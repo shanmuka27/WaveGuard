@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+requests
+pyserial
+numpy
+scipy
+ibm-watsonx-ai
