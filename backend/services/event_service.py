@@ -18,6 +18,7 @@ class EventService:
         )
         self.latest_by_node: dict[str, Reading] = {}
         self.severity_by_node: dict[str, Severity] = {}
+        self.current_event: Optional[Event] = None
         self._last_event_signature: Optional[Tuple[str, Tuple[str, ...], str]] = None
         self._last_event_time: Optional[datetime] = None
 
@@ -25,11 +26,17 @@ class EventService:
         self.histories.clear()
         self.latest_by_node.clear()
         self.severity_by_node.clear()
+        self.current_event = None
         self._last_event_signature = None
         self._last_event_time = None
 
     def ingest(self, reading: Reading, detect: bool = True) -> Optional[Event]:
         self.database.save_reading(reading)
+        previous = self.latest_by_node.get(reading.node_id)
+        if previous is not None and previous.source != reading.source:
+            # A real sensor replacing a simulated feed must start a fresh signal window.
+            self.histories[reading.node_id].clear()
+            self.severity_by_node.pop(reading.node_id, None)
         self.histories[reading.node_id].append(reading)
         self.latest_by_node[reading.node_id] = reading
         return self.detect_event() if detect else None
@@ -48,6 +55,7 @@ class EventService:
             {node_id: list(history) for node_id, history in self.histories.items()},
         )
         if event is None:
+            self.current_event = None
             return None
 
         signature = (
@@ -64,10 +72,18 @@ class EventService:
         if is_duplicate:
             return None
 
+        self.current_event = event
         self._last_event_signature = signature
         self._last_event_time = now
         self.database.save_event(event)
         return event
+
+    def overall_severity(self) -> Severity:
+        severities = list(self.severity_by_node.values())
+        if self.current_event is not None:
+            severities.append(self.current_event.severity)
+        rank = {Severity.SAFE: 0, Severity.WATCH: 1, Severity.WARNING: 2}
+        return max(severities, key=rank.__getitem__, default=Severity.SAFE)
 
     def nodes(self) -> list[NodeStatus]:
         return [

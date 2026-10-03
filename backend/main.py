@@ -1,16 +1,25 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.routes import agent_tools, events, nodes, readings, scenarios
-from backend.runtime import connections, database
+from backend.runtime import connections, database, serial_bridge
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     database.initialize()
-    yield
+    serial_task = (
+        asyncio.create_task(serial_bridge.run()) if serial_bridge.port else None
+    )
+    try:
+        yield
+    finally:
+        if serial_task is not None:
+            serial_task.cancel()
+            await asyncio.gather(serial_task, return_exceptions=True)
 
 app = FastAPI(
     title="WaveGuard API",

@@ -27,7 +27,11 @@ curl http://127.0.0.1:8000/api/events/latest
 curl http://127.0.0.1:8000/api/nodes
 ```
 
-Available scenario names are `normal`, `local_disturbance`, `seiche`, and `sudden_surge`. Each run produces twelve readings for each of three nodes. `LUDINGTON-01` represents the physical node during the demo; the other nodes remain labeled as simulated.
+Available scenario names are `normal`, `local_disturbance`, `seiche`, and `sudden_surge`. Each run produces twelve simulated readings for each of three nodes. The Arduino supplies physical readings for `LUDINGTON-01` when connected.
+
+## Arduino connection
+
+Set `SERIAL_PORT` in `.env` to the Arduino device path (for example, `/dev/cu.usbmodem...` on macOS). The backend opens the port at `SERIAL_BAUD_RATE`, converts incoming distance readings using `REFERENCE_DISTANCE_CM`, and sends `STATE,SAFE`, `STATE,WATCH`, or `STATE,WARNING` when the network state changes. If the device is unplugged, the API keeps running and retries the connection. Leave `SERIAL_PORT` empty to run without hardware.
 
 ## Live dashboard connection
 

@@ -3,14 +3,14 @@ from math import pi, sin
 
 from fastapi import APIRouter, HTTPException
 
-from backend.runtime import connections, event_service
+from backend.runtime import connections, event_service, serial_bridge
 from backend.schemas import Reading, ReadingSource, ScenarioResult
 
 router = APIRouter(prefix="/api/scenarios", tags=["scenarios"])
 
 SCENARIOS = {"normal", "local_disturbance", "seiche", "sudden_surge"}
 NODES = (
-    ("LUDINGTON-01", ReadingSource.PHYSICAL),
+    ("LUDINGTON-01", ReadingSource.SIMULATED),
     ("MUSKEGON-02", ReadingSource.SIMULATED),
     ("HOLLAND-03", ReadingSource.SIMULATED),
 )
@@ -50,6 +50,7 @@ async def run_scenario(scenario: str) -> ScenarioResult:
             generated += 1
 
     latest_event = event_service.detect_event()
+    await serial_bridge.send_state(event_service.overall_severity())
 
     await connections.broadcast(
         {

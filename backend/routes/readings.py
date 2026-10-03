@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query
 
-from backend.runtime import connections, database, event_service
+from backend.runtime import connections, database, event_service, serial_bridge
 from backend.schemas import IngestResult, Reading
 
 router = APIRouter(prefix="/api/readings", tags=["readings"])
@@ -16,6 +16,7 @@ async def submit_reading(reading: Reading) -> IngestResult:
             "event": event.model_dump(mode="json") if event else None,
         }
     )
+    await serial_bridge.send_state(event_service.overall_severity())
     return IngestResult(reading=reading, event=event)
 
 
