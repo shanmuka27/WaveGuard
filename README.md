@@ -51,6 +51,8 @@ Open `http://127.0.0.1:8000/api/health` to verify the API.
 
 Every component must follow [`docs/api-contract.md`](docs/api-contract.md). Agree on contract changes in `main` before implementing them in individual work branches.
 
+The complete ownership, specifications, milestones, acceptance tests, Git workflow, and demo plan are in [`docs/team-build-plan.md`](docs/team-build-plan.md).
+
 ## Team branches
 
 Branches will be created after this shared scaffold is approved:
