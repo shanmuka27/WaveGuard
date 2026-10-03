@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routes import events, nodes, readings, scenarios
+from backend.routes import agent_tools, events, nodes, readings, scenarios
 from backend.runtime import connections, database
 
 
@@ -31,6 +31,7 @@ app.include_router(readings.router)
 app.include_router(nodes.router)
 app.include_router(events.router)
 app.include_router(scenarios.router)
+app.include_router(agent_tools.router)
 
 
 @app.get("/api/health")
