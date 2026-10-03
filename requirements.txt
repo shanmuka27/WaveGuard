@@ -6,4 +6,3 @@ requests
 pyserial
 numpy
 scipy
-ibm-watsonx-ai
