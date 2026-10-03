@@ -1,5 +1,6 @@
 // WaveGuard operator dashboard.
-// Query parameters: ?api=http://host:8000 to point at another backend, ?mock=1 to use mock data.
+// Query parameters: ?api=http://host:8000 to point at another backend, ?mock=1 to use mock
+// data, and ?mock=1&physical=1 to add a fake 1 Hz Arduino stream for LUDINGTON-01.
 (function () {
   const params = new URLSearchParams(window.location.search);
   const API_BASE_URL = (params.get("api") || "http://127.0.0.1:8000").replace(/\/+$/, "");
@@ -9,6 +10,7 @@
   const MAX_POINTS_PER_NODE = 120;
   const POLL_INTERVAL_MS = 3000;
   const NODES_REFRESH_DEBOUNCE_MS = 400;
+  const CLOCK_SKEW_TOLERANCE_MS = 30000;
 
   const SEVERITY_RANK = { unknown: -1, safe: 0, watch: 1, warning: 2 };
   const CLASSIFICATION_LABELS = {
@@ -39,6 +41,8 @@
     runningScenario: null,
     lastScenario: null,
     lastUpdate: null,
+    clockOffsets: new Map(), // node_id -> ms added to unsynced physical timestamps
+    explainToken: 0,
   };
 
   // ---------- Helpers ----------
@@ -197,7 +201,7 @@
     }
   }
 
-  const api = state.mode === "mock" ? new window.WaveGuardMock.MockApi() : new HttpApi(API_BASE_URL);
+  const api = state.mode === "mock" ? new window.WaveGuardMock.MockApi({ physical: params.get("physical") === "1" }) : new HttpApi(API_BASE_URL);
 
   // ---------- Derived state ----------
 
@@ -237,14 +241,26 @@
     state.lastUpdate = new Date();
   }
 
+  // The Arduino stamps readings from its own clock, which is not synced to the
+  // backend. Plot unsynced live physical readings at receive time instead.
+  function trackClockSkew(reading) {
+    const skew = Date.now() - Date.parse(reading.timestamp);
+    if (reading.source === "physical" && Math.abs(skew) > CLOCK_SKEW_TOLERANCE_MS) {
+      state.clockOffsets.set(reading.node_id, skew);
+    } else {
+      state.clockOffsets.delete(reading.node_id);
+    }
+  }
+
   function addReading(reading) {
     let entry = state.series.get(reading.node_id);
-    if (!entry) {
+    if (!entry || entry.source !== reading.source) {
+      // Matches the backend: a source switch starts a fresh signal window.
       entry = { source: reading.source, points: [] };
       state.series.set(reading.node_id, entry);
     }
-    entry.source = reading.source;
-    entry.points.push({ x: Date.parse(reading.timestamp), y: reading.water_level_cm });
+    const offset = reading.source === "physical" ? state.clockOffsets.get(reading.node_id) || 0 : 0;
+    entry.points.push({ x: Date.parse(reading.timestamp) + offset, y: reading.water_level_cm });
     entry.points.sort((a, b) => a.x - b.x);
     if (entry.points.length > MAX_POINTS_PER_NODE) {
       entry.points.splice(0, entry.points.length - MAX_POINTS_PER_NODE);
@@ -255,13 +271,16 @@
     else state.nodes.set(reading.node_id, { node_id: reading.node_id, source: reading.source, severity: "safe", last_reading: reading });
   }
 
-  async function reloadReadings(limit = SCENARIO_READING_COUNT) {
-    const readings = await api.latestReadings(limit);
+  function replaceSeries(readings) {
     state.series.clear();
     readings
       .slice()
       .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
       .forEach(addReading);
+  }
+
+  async function reloadReadings(limit = SCENARIO_READING_COUNT) {
+    replaceSeries(await api.latestReadings(limit));
   }
 
   async function refreshNodes() {
@@ -275,23 +294,30 @@
     nodesRefreshTimer = setTimeout(async () => {
       try {
         await refreshNodes();
-        render();
+        scheduleRender();
       } catch (error) {
         handleBackendError(error);
       }
     }, NODES_REFRESH_DEBOUNCE_MS);
   }
 
-  function setEvent(event, { fromLive = false } = {}) {
+  function resetExplanation() {
+    state.explainToken += 1;
+    state.explanation = null;
+    state.explainState = "idle";
+    state.explainError = null;
+  }
+
+  // newRun: the event comes from a fresh scenario run, so any earlier explanation
+  // no longer applies. Otherwise (live sensor updates) the last explanation stays
+  // visible and is marked as covering an earlier event.
+  function setEvent(event, { fromLive = false, newRun = false } = {}) {
     const previous = state.event;
     if (previous && event && previous.event_id === event.event_id) return;
 
     state.event = event || null;
-    // Keep the current explanation when the detector re-reports the same situation.
-    if (eventSignature(previous) !== eventSignature(state.event)) {
-      state.explanation = null;
-      state.explainState = "idle";
-      state.explainError = null;
+    if (eventSignature(previous) !== eventSignature(state.event) && (newRun || !event)) {
+      resetExplanation();
     }
 
     const shouldAutoExplain =
@@ -314,11 +340,7 @@
       api.latestEvent(),
     ]);
     state.nodes = new Map(nodes.map((node) => [node.node_id, node]));
-    state.series.clear();
-    readings
-      .slice()
-      .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
-      .forEach(addReading);
+    replaceSeries(readings);
     setEvent(event, { fromLive: live });
     setBackend("online");
     touch();
@@ -358,14 +380,17 @@
   function handleLiveMessage(message) {
     switch (message.type) {
       case "reading":
-        if (message.reading) addReading(message.reading);
+        if (message.reading) {
+          trackClockSkew(message.reading);
+          addReading(message.reading);
+        }
         if (message.event) setEvent(message.event, { fromLive: true });
         scheduleNodesRefresh();
         break;
       case "scenario_complete":
-        setEvent(message.event, { fromLive: true });
+        setEvent(message.event, { fromLive: true, newRun: true });
         Promise.all([reloadReadings(), refreshNodes()])
-          .then(render)
+          .then(scheduleRender)
           .catch(handleBackendError);
         break;
       case "event":
@@ -377,7 +402,20 @@
     }
     setBackend("online");
     touch();
-    render();
+    scheduleRender();
+  }
+
+  // Coalesce bursts of live messages (1 Hz sensor plus node refreshes) into one render per frame.
+  let renderQueued = false;
+  function scheduleRender() {
+    if (renderQueued) return;
+    renderQueued = true;
+    const flush = () => {
+      renderQueued = false;
+      render();
+    };
+    if (window.requestAnimationFrame) window.requestAnimationFrame(flush);
+    else setTimeout(flush, 16);
   }
 
   // ---------- Actions ----------
@@ -386,10 +424,11 @@
     if (state.runningScenario) return;
     state.runningScenario = scenario;
     $("scenario-status").textContent = `Running ${scenario.replace(/_/g, " ")}…`;
+    resetExplanation();
     render();
     try {
       const result = await api.runScenario(scenario);
-      setEvent(result.event, { fromLive: true });
+      setEvent(result.event, { fromLive: true, newRun: true });
       await Promise.all([reloadReadings(result.readings_generated || SCENARIO_READING_COUNT), refreshNodes()]);
       state.lastScenario = scenario;
       setBackend("online");
@@ -410,17 +449,20 @@
   async function explain(refresh = false) {
     const event = state.event;
     if (!event) return;
+    // A new scenario run bumps the token; results for an older run are dropped.
+    // Results for an event the sensor stream has since superseded are kept and marked.
+    const token = ++state.explainToken;
     state.explainState = "loading";
     state.explainError = null;
     render();
     try {
       const result = await api.explain(event.event_id, refresh);
-      if (!state.event || state.event.event_id !== event.event_id) return;
+      if (token !== state.explainToken) return;
       state.explanation = result;
       state.explainState = "done";
       if (state.mode !== "mock") state.ibm = { ...state.ibm, state: "ready", message: null };
     } catch (error) {
-      if (!state.event || state.event.event_id !== event.event_id) return;
+      if (token !== state.explainToken) return;
       state.explainState = "error";
       state.explainError = { code: error.code || (error.status ? `http_${error.status}` : "error"), message: error.message };
       if (error.code === "not_configured") state.ibm = { ...state.ibm, state: "not_configured", message: error.message };
@@ -570,6 +612,11 @@
     );
     chartView.setSeries(series);
     $("chart-empty").hidden = series.size > 0;
+
+    const unsynced = [...state.clockOffsets.keys()].filter((nodeId) => state.series.has(nodeId));
+    $("chart-note").textContent = unsynced.length
+      ? `Dashed lines are simulated · ${unsynced.join(", ")} clock not synced, plotted at receive time`
+      : "Dashed lines are simulated nodes";
   }
 
   function metric(label, value, fraction) {
@@ -699,11 +746,16 @@
     const loading = state.explainState === "loading";
 
     button.disabled = !state.event || loading || state.ibm.state === "missing";
+    const explainsCurrent = Boolean(
+      state.explanation && state.event && state.explanation.event_id === state.event.event_id
+    );
     button.textContent = loading
       ? "Asking Granite…"
-      : state.explanation && state.explanation.source === "granite"
-        ? "Regenerate"
-        : "Explain with Granite";
+      : state.explanation && !explainsCurrent
+        ? "Explain latest event"
+        : state.explanation && state.explanation.source === "granite"
+          ? "Regenerate"
+          : "Explain with Granite";
 
     const model = $("ibm-model");
     model.hidden = !state.ibm.modelId;
@@ -750,7 +802,17 @@
     }
 
     if (state.explainState === "done" && state.explanation) {
-      body.replaceChildren(...explanationView(state.explanation));
+      const staleNote =
+        !explainsCurrent && state.event
+          ? h("p", {
+              class: "stale-note",
+              role: "note",
+              text: `Explains earlier event ${state.explanation.event_id}. The detector now reports ${
+                CLASSIFICATION_LABELS[state.event.classification] || state.event.classification
+              } · ${state.event.severity} (${state.event.event_id}).`,
+            })
+          : null;
+      body.replaceChildren(...[staleNote, ...explanationView(state.explanation)].filter(Boolean));
       return;
     }
 
@@ -808,9 +870,10 @@
     document.querySelectorAll("[data-scenario]").forEach((button) => {
       button.addEventListener("click", () => runScenario(button.dataset.scenario));
     });
-    $("explain-button").addEventListener("click", () =>
-      explain(Boolean(state.explanation && state.explanation.source === "granite"))
-    );
+    $("explain-button").addEventListener("click", () => {
+      const current = state.explanation;
+      explain(Boolean(current && current.source === "granite" && state.event && current.event_id === state.event.event_id));
+    });
     $("retry-backend").addEventListener("click", connectBackend);
     $("use-mock").addEventListener("click", () => {
       const url = new URL(window.location.href);
@@ -826,6 +889,6 @@
     startPolling();
   }
 
-  window.WaveGuard = { API_BASE_URL, state };
+  window.WaveGuard = { API_BASE_URL, state, api };
   init();
 })();

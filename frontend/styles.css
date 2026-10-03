@@ -738,6 +738,15 @@ code {
   justify-content: space-between;
 }
 
+.stale-note {
+  margin-bottom: 0.9rem;
+  padding: 0.55rem 0.8rem;
+  border-left: 3px solid var(--watch);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--watch) 8%, var(--panel));
+  font-size: 0.85rem;
+}
+
 .error-state {
   padding: 0.9rem 1rem;
   border: 1px solid color-mix(in srgb, var(--warning) 50%, transparent);

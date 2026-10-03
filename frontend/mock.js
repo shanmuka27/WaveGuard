@@ -1,11 +1,15 @@
 // In-browser stand-in for the backend so the dashboard can run without the API.
 // It mirrors the backend scenario shapes and response schemas from docs/api-contract.md.
 (function () {
+  // Scenarios label every node simulated, as backend/routes/scenarios.py does.
+  // LUDINGTON-01 only becomes physical when the Arduino stream (or ?physical=1 here) reports.
   const NODES = [
-    ["LUDINGTON-01", "physical"],
+    ["LUDINGTON-01", "simulated"],
     ["MUSKEGON-02", "simulated"],
     ["HOLLAND-03", "simulated"],
   ];
+  // The firmware's unsynced default clock (2026-10-03T16:00:00Z plus uptime).
+  const ARDUINO_BASE_EPOCH_MS = 1791043200 * 1000;
   const ALL_NODE_IDS = NODES.map(([nodeId]) => nodeId);
 
   // Expected detector output for each scenario, matching backend/routes/scenarios.py.
@@ -118,16 +122,35 @@
   }
 
   class MockApi {
-    constructor() {
+    constructor({ physical = false } = {}) {
       this.readings = [];
       this.events = [];
       this.nodeSeverity = {};
       this.onMessage = () => {};
+      this.physical = physical;
+      this.bootedAt = Date.now();
     }
 
     subscribe(onMessage, onStatus) {
       this.onMessage = onMessage;
       onStatus("mock");
+      if (this.physical) setInterval(() => this.emitPhysicalReading(), 1000);
+    }
+
+    // Imitates the Arduino: 1 Hz still-water readings stamped with its unsynced clock.
+    emitPhysicalReading() {
+      const reading = {
+        node_id: "LUDINGTON-01",
+        timestamp: new Date(ARDUINO_BASE_EPOCH_MS + (Date.now() - this.bootedAt)).toISOString(),
+        water_level_cm: Number((14.0 + (Math.random() - 0.5) * 0.2).toFixed(2)),
+        quality: 0.95,
+        source: "physical",
+      };
+      const previous = [...this.readings].reverse().find((item) => item.node_id === reading.node_id);
+      if (previous && previous.source !== reading.source) this.nodeSeverity[reading.node_id] = "safe";
+      this.readings.push(reading);
+      this.readings = this.readings.slice(-600);
+      this.onMessage({ type: "reading", reading, event: null });
     }
 
     async health() {

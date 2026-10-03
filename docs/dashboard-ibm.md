@@ -16,6 +16,7 @@ python -m http.server 5500 --bind 127.0.0.1 --directory frontend
 | --- | --- |
 | `http://127.0.0.1:5500/` | Live backend at `http://127.0.0.1:8000` |
 | `http://127.0.0.1:5500/?mock=1` | Mock data in the browser, no backend needed |
+| `http://127.0.0.1:5500/?mock=1&physical=1` | Mock data plus a fake 1 Hz Arduino stream for `LUDINGTON-01` |
 | `http://127.0.0.1:5500/?api=http://192.168.1.20:8000` | Backend on another machine |
 
 If the backend is unreachable, the page shows a banner with **Retry** and **Use mock data**.
@@ -24,6 +25,9 @@ If the backend is unreachable, the page shows a banner with **Retry** and **Use 
 
 - The dashboard listens on `/ws/live` for `reading` and `scenario_complete` messages and reconnects automatically.
 - While the socket is down it polls `/api/nodes`, `/api/readings/latest`, and `/api/events/latest` every 3 seconds and shows **Polling REST**.
+- Scenario runs label all three nodes `simulated`. `LUDINGTON-01` shows `physical` only while Arduino readings arrive. When a node's source changes, its chart line restarts, matching the backend's fresh signal window.
+- The Arduino stamps readings from its own clock, which is unsynced unless it receives `TIME,<epoch>`. Live physical readings more than 30 seconds off are plotted at receive time, and the chart header says so.
+- When live sensor readings make the detector re-report a different event, the last Granite explanation stays visible with an "Explains earlier event" note. Starting a new scenario clears it.
 - Network severity is the highest node severity, raised to the event severity for affected nodes while the event is still active (at least one affected node is not `safe`). A per-node seiche reading is `watch`; the correlated event makes it a network `warning`.
 
 ## Backend wiring (for `backend/main.py`)
