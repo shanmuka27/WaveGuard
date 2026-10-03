@@ -1,5 +1,8 @@
-from datetime import datetime
+from __future__ import annotations
+
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -38,5 +41,24 @@ class Event(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     affected_nodes: list[str]
     amplitude_cm: float
-    period_seconds: float | None = None
+    period_seconds: Optional[float] = None
     correlation_score: float = Field(ge=0.0, le=1.0)
+    detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class NodeStatus(BaseModel):
+    node_id: str
+    source: ReadingSource
+    severity: Severity
+    last_reading: Reading
+
+
+class IngestResult(BaseModel):
+    reading: Reading
+    event: Optional[Event] = None
+
+
+class ScenarioResult(BaseModel):
+    scenario: str
+    readings_generated: int
+    event: Optional[Event] = None

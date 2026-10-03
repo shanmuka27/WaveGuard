@@ -47,6 +47,8 @@ uvicorn backend.main:app --reload
 
 Open `http://127.0.0.1:8000/api/health` to verify the API.
 
+Backend endpoint and scenario examples are in [`docs/backend.md`](docs/backend.md).
+
 ## Shared contracts
 
 Every component must follow [`docs/api-contract.md`](docs/api-contract.md). Agree on contract changes in `main` before implementing them in individual work branches.
