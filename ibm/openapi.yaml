@@ -1,0 +1,202 @@
+openapi: 3.0.3
+info:
+  title: WaveGuard Orchestrate Tools
+  version: 0.1.0
+  description: >
+    Read-only WaveGuard operations exposed as IBM watsonx Orchestrate tools.
+    The deterministic backend owns severity. These tools report it and ask
+    Granite to explain it; none of them change severity or trigger hardware.
+servers:
+  # watsonx Orchestrate must reach the backend over HTTPS. During the demo,
+  # expose the local API with a tunnel (for example `ngrok http 8000`) and
+  # replace this URL before importing the file.
+  - url: https://REPLACE-WITH-TUNNEL.example.com
+paths:
+  /api/agent/situation:
+    get:
+      operationId: getSituationReport
+      summary: Get the current network situation
+      description: >
+        Returns overall network severity, every node's source (physical or
+        simulated) and state, and the active hazard event if one exists.
+      responses:
+        "200":
+          description: Current situation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SituationReport"
+  /api/events/latest:
+    get:
+      operationId: getLatestEvent
+      summary: Get the most recently detected event
+      responses:
+        "200":
+          description: Latest stored event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        "404":
+          description: No events have been detected yet
+  /api/events:
+    get:
+      operationId: listEvents
+      summary: List recent detected events, newest first
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        "200":
+          description: Recent events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Event"
+  /api/events/{event_id}/explain:
+    post:
+      operationId: explainEvent
+      summary: Explain a stored event with IBM Granite
+      description: >
+        Sends the stored event (never raw sensor text) to IBM Granite and returns
+        an operator summary, evidence, recommended actions, and a public-warning
+        draft. Severity in the response is copied from the detector.
+      parameters:
+        - name: event_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: evt-1a2b3c4d5e
+      responses:
+        "200":
+          description: Granite explanation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExplanationResult"
+        "404":
+          description: Event not found
+        "502":
+          description: IBM watsonx.ai rejected or failed the request
+        "503":
+          description: Granite credentials are not configured
+components:
+  schemas:
+    Severity:
+      type: string
+      enum: [safe, watch, warning]
+    Event:
+      type: object
+      required: [event_id, classification, severity, confidence, affected_nodes, amplitude_cm, correlation_score]
+      properties:
+        event_id:
+          type: string
+        classification:
+          type: string
+          enum: [normal, local_disturbance, seiche_like, sudden_surge, sensor_fault]
+        severity:
+          $ref: "#/components/schemas/Severity"
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        affected_nodes:
+          type: array
+          items:
+            type: string
+        amplitude_cm:
+          type: number
+        period_seconds:
+          type: number
+          nullable: true
+        correlation_score:
+          type: number
+          minimum: 0
+          maximum: 1
+        detected_at:
+          type: string
+          format: date-time
+    Reading:
+      type: object
+      properties:
+        node_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        water_level_cm:
+          type: number
+        quality:
+          type: number
+        source:
+          type: string
+          enum: [physical, simulated]
+    NodeStatus:
+      type: object
+      properties:
+        node_id:
+          type: string
+        source:
+          type: string
+          enum: [physical, simulated]
+        severity:
+          $ref: "#/components/schemas/Severity"
+        last_reading:
+          $ref: "#/components/schemas/Reading"
+    SituationReport:
+      type: object
+      properties:
+        overall_severity:
+          $ref: "#/components/schemas/Severity"
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeStatus"
+        latest_event:
+          allOf:
+            - $ref: "#/components/schemas/Event"
+          nullable: true
+        summary:
+          type: string
+    ExplanationResult:
+      type: object
+      properties:
+        event_id:
+          type: string
+        severity:
+          $ref: "#/components/schemas/Severity"
+        classification:
+          type: string
+        source:
+          type: string
+          enum: [granite, prerecorded]
+        model_id:
+          type: string
+          nullable: true
+        generated_at:
+          type: string
+          format: date-time
+        explanation:
+          type: object
+          properties:
+            summary:
+              type: string
+            evidence:
+              type: array
+              items:
+                type: string
+            recommended_actions:
+              type: array
+              items:
+                type: string
+            public_warning:
+              type: string

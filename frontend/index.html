@@ -3,14 +3,124 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>WaveGuard</title>
+    <title>WaveGuard Operations</title>
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="assets/vendor/leaflet/leaflet.css" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main>
-      <h1>WaveGuard</h1>
-      <p id="status">Dashboard scaffold ready.</p>
+    <header class="topbar">
+      <div class="brand">
+        <img src="assets/favicon.svg" alt="" width="28" height="28" />
+        <div>
+          <h1>WaveGuard</h1>
+          <p>Lake Michigan eastern shore · coastal hazard network</p>
+        </div>
+      </div>
+      <ul class="status-list" aria-label="System status">
+        <li class="status" id="status-backend"><span class="dot"></span><span class="label">Backend</span><span class="value">Checking…</span></li>
+        <li class="status" id="status-stream"><span class="dot"></span><span class="label">Live stream</span><span class="value">—</span></li>
+        <li class="status" id="status-ibm"><span class="dot"></span><span class="label">IBM Granite</span><span class="value">—</span></li>
+        <li class="status" id="status-mode"><span class="dot"></span><span class="label">Data</span><span class="value">—</span></li>
+      </ul>
+    </header>
+
+    <div class="banner" id="offline-banner" hidden>
+      <span>Cannot reach the WaveGuard backend at <code id="api-url"></code>.</span>
+      <button type="button" class="button small" id="retry-backend">Retry</button>
+      <button type="button" class="button small ghost" id="use-mock">Use mock data</button>
+    </div>
+
+    <main class="grid">
+      <section class="panel summary" id="summary" aria-labelledby="summary-title" data-severity="unknown">
+        <div class="summary-main">
+          <h2 id="summary-title" class="eyebrow">Network severity</h2>
+          <p class="severity-word" id="overall-severity">—</p>
+          <p class="summary-text" id="summary-text">Waiting for readings…</p>
+        </div>
+        <dl class="summary-stats">
+          <div><dt>Nodes reporting</dt><dd id="stat-nodes">0</dd></div>
+          <div><dt>Physical</dt><dd id="stat-physical">0</dd></div>
+          <div><dt>Simulated</dt><dd id="stat-simulated">0</dd></div>
+          <div><dt>Last update</dt><dd id="stat-updated">—</dd></div>
+        </dl>
+      </section>
+
+      <section class="panel scenarios" aria-labelledby="scenarios-title">
+        <h2 id="scenarios-title" class="eyebrow">Demo scenarios</h2>
+        <div class="scenario-buttons">
+          <button type="button" class="button scenario" data-scenario="normal">
+            <span class="scenario-name">Normal</span><span class="scenario-hint">Expect safe</span>
+          </button>
+          <button type="button" class="button scenario" data-scenario="local_disturbance">
+            <span class="scenario-name">Local disturbance</span><span class="scenario-hint">Expect watch</span>
+          </button>
+          <button type="button" class="button scenario" data-scenario="seiche">
+            <span class="scenario-name">Seiche</span><span class="scenario-hint">Expect warning</span>
+          </button>
+          <button type="button" class="button scenario" data-scenario="sudden_surge">
+            <span class="scenario-name">Sudden surge</span><span class="scenario-hint">Expect warning</span>
+          </button>
+        </div>
+        <p class="muted small" id="scenario-status" role="status"></p>
+      </section>
+
+      <section class="panel map-panel" aria-labelledby="map-title">
+        <div class="panel-head">
+          <h2 id="map-title" class="eyebrow">Shoreline nodes</h2>
+          <div class="legend">
+            <span class="legend-item"><span class="marker-swatch physical"></span>Physical</span>
+            <span class="legend-item"><span class="marker-swatch simulated"></span>Simulated</span>
+          </div>
+        </div>
+        <div id="map" class="map" role="img" aria-label="Map of shoreline nodes"></div>
+        <ul class="node-list" id="node-list"></ul>
+      </section>
+
+      <section class="panel chart-panel" aria-labelledby="chart-title">
+        <div class="panel-head">
+          <h2 id="chart-title" class="eyebrow">Water level (cm)</h2>
+          <span class="muted small">Dashed lines are simulated nodes</span>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="level-chart" aria-label="Live water level by node"></canvas>
+          <p class="chart-empty" id="chart-empty">No readings yet. Run a scenario to begin.</p>
+        </div>
+      </section>
+
+      <section class="panel event-panel" id="event-panel" aria-labelledby="event-title" aria-live="polite">
+        <div class="panel-head">
+          <h2 id="event-title" class="eyebrow">Latest event evidence</h2>
+          <span class="muted small">Severity set by the deterministic detector</span>
+        </div>
+        <div id="event-body"></div>
+      </section>
+
+      <section class="panel ibm-panel" aria-labelledby="ibm-title">
+        <div class="panel-head">
+          <h2 id="ibm-title" class="eyebrow">IBM Granite explanation</h2>
+          <span class="chip" id="ibm-model" hidden></span>
+        </div>
+        <div class="ibm-controls">
+          <button type="button" class="button primary" id="explain-button" disabled>Explain with Granite</button>
+          <label class="toggle">
+            <input type="checkbox" id="auto-explain" checked />
+            <span>Auto-explain warnings</span>
+          </label>
+        </div>
+        <div id="ibm-body" aria-live="polite"></div>
+      </section>
     </main>
+
+    <footer class="footer muted small">
+      Simulated nodes are labeled. Granite explains detector output and never changes severity or controls physical alerts.
+    </footer>
+
+    <script src="assets/vendor/chart.umd.min.js"></script>
+    <script src="assets/vendor/leaflet/leaflet.js"></script>
+    <script src="map.js"></script>
+    <script src="charts.js"></script>
+    <script src="mock.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

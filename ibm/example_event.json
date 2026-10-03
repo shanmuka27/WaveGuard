@@ -1,0 +1,39 @@
+{
+  "description": "Saved Granite input and response for a three-node seiche warning. Shown in the dashboard only as a labeled prerecorded fallback when IBM watsonx.ai is unavailable.",
+  "input": {
+    "event": {
+      "event_id": "evt-example01",
+      "classification": "seiche_like",
+      "severity": "warning",
+      "confidence": 0.85,
+      "affected_nodes": ["LUDINGTON-01", "MUSKEGON-02", "HOLLAND-03"],
+      "amplitude_cm": 7.0,
+      "period_seconds": 6.0,
+      "correlation_score": 0.97,
+      "detected_at": "2026-10-03T14:30:00Z"
+    },
+    "nodes": [
+      { "node_id": "LUDINGTON-01", "location": "Ludington", "source": "physical" },
+      { "node_id": "MUSKEGON-02", "location": "Muskegon", "source": "simulated" },
+      { "node_id": "HOLLAND-03", "location": "Holland", "source": "simulated" }
+    ]
+  },
+  "response": {
+    "summary": "All three monitored shoreline nodes are oscillating together with matching timing, consistent with a seiche-like movement of the lake surface. The detector rated this a warning because the motion is strong and highly correlated across the network rather than confined to one site.",
+    "evidence": [
+      "Three of three nodes show abnormal oscillation: Ludington (physical sensor), Muskegon and Holland (simulated).",
+      "Peak-to-trough amplitude reached 7.0 cm.",
+      "Estimated oscillation period is 6.0 seconds in the scaled demonstration.",
+      "Cross-node correlation score is 0.97, so the nodes are moving together.",
+      "Detector confidence is 0.85."
+    ],
+    "recommended_actions": [
+      "Notify beach and harbor staff at Ludington, Muskegon, and Holland of a possible seiche.",
+      "Advise clearing piers, breakwalls, and the water's edge until levels stabilize.",
+      "Confirm the Ludington physical sensor reading visually before public release.",
+      "Keep monitoring for repeated rises and falls over the next cycles.",
+      "Approve and publish the public advisory below if conditions persist."
+    ],
+    "public_warning": "Water levels along the Ludington, Muskegon, and Holland shoreline are rising and falling quickly. Stay off piers and breakwalls and keep away from the water's edge until officials say conditions are safe."
+  }
+}
