@@ -13,4 +13,5 @@ serial_bridge = SerialBridge(
     settings.reference_distance_cm,
     event_service,
     connections,
+    scenario_hold_seconds=settings.scenario_hold_seconds,
 )

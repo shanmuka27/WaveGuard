@@ -81,8 +81,8 @@ def explain_event(
     response_model=ExplanationResult,
     summary="Saved Granite response, labeled prerecorded, for when IBM is unavailable",
 )
-def prerecorded_example(event_id: Optional[str] = None) -> ExplanationResult:
-    return load_prerecorded(database.event(event_id) if event_id else None)
+def prerecorded_example() -> ExplanationResult:
+    return load_prerecorded()
 
 
 @router.get(

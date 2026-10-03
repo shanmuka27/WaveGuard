@@ -98,6 +98,9 @@ def test_explain_keeps_detector_severity_and_caches_result():
     assert result.severity == "warning"
     assert result.classification == "seiche_like"
     assert result.explanation.recommended_actions == ["Clear the piers"]
+    assert "simulated or unverified" in result.explanation.summary
+    assert "Maximum peak-to-trough amplitude" in result.explanation.evidence[1]
+    assert "no real shoreline hazard is confirmed" in result.explanation.public_warning
     assert again is result
     chat_calls = [call for call in session.calls if "/ml/v1/text/chat" in call[0]]
     assert len(chat_calls) == 1
@@ -132,9 +135,9 @@ def test_network_timeout_is_reported():
     assert client.status()["last_error"]
 
 
-def test_prerecorded_example_is_labeled_and_uses_event_severity():
-    result = load_prerecorded(EVENT)
+def test_prerecorded_example_keeps_its_own_event_identity():
+    result = load_prerecorded()
     assert result.source == "prerecorded"
-    assert result.event_id == "evt-test"
+    assert result.event_id == "evt-example01"
     assert result.severity == "warning"
     assert result.explanation.public_warning

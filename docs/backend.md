@@ -33,6 +33,8 @@ Available scenario names are `normal`, `local_disturbance`, `seiche`, and `sudde
 
 Set `SERIAL_PORT` in `.env` to the Arduino device path (for example, `/dev/cu.usbmodem...` on macOS). The backend opens the port at `SERIAL_BAUD_RATE`, converts incoming distance readings using `REFERENCE_DISTANCE_CM`, and sends `STATE,SAFE`, `STATE,WATCH`, or `STATE,WARNING` when the network state changes. If the device is unplugged, the API keeps running and retries the connection. Leave `SERIAL_PORT` empty to run without hardware.
 
+After the first reading on each connection, the backend sends `TIME,<unix_epoch>` to synchronize the Arduino clock. A physical reading more than 30 seconds off is stored with server receive time so it remains visible in recent readings. A simulated warning scenario holds its alert for `SCENARIO_HOLD_SECONDS` (default 30) while incoming Arduino readings are paused; the physical stream resumes automatically afterward. Set this value to `0` to disable the demo hold.
+
 ## Live dashboard connection
 
 Connect the dashboard to `ws://127.0.0.1:8000/ws/live`. Messages contain a `type` field and either a reading, an event, or a scenario completion summary.

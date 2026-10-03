@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from backend.serial_reader import parse_reading_line, state_command
@@ -33,6 +35,8 @@ class SerialBridge:
         connections: ConnectionManager,
         node_id: str = "LUDINGTON-01",
         serial_factory: Callable[[str, int], Any] = open_serial,
+        clock: Callable[[], float] = time.time,
+        scenario_hold_seconds: float = 30.0,
     ) -> None:
         self.port = port
         self.baud_rate = baud_rate
@@ -41,9 +45,21 @@ class SerialBridge:
         self.connections = connections
         self.node_id = node_id
         self.serial_factory = serial_factory
+        self.clock = clock
+        self.scenario_hold_seconds = scenario_hold_seconds
         self._connection: Optional[Any] = None
         self._last_sent: Optional[Severity] = None
+        self._time_sent = False
+        self._scenario_hold_until = 0.0
         self._write_lock = asyncio.Lock()
+
+    def hold_warning_scenario(self, severity: Severity) -> None:
+        """Keep a simulated warning visible while the demo is being explained."""
+        self._scenario_hold_until = (
+            time.monotonic() + self.scenario_hold_seconds
+            if severity == Severity.WARNING
+            else 0.0
+        )
 
     async def run(self) -> None:
         """Reconnect after an unplug or read failure until the app shuts down."""
@@ -55,6 +71,7 @@ class SerialBridge:
                 )
                 self._connection = connection
                 self._last_sent = None
+                self._time_sent = False
                 logger.info("Arduino connected on %s", self.port)
                 await self.send_state(self.event_service.overall_severity())
 
@@ -74,6 +91,7 @@ class SerialBridge:
             finally:
                 self._connection = None
                 self._last_sent = None
+                self._time_sent = False
                 if connection is not None:
                     try:
                         connection.close()
@@ -81,9 +99,15 @@ class SerialBridge:
                         logger.warning("Could not close Arduino port: %s", error)
 
     async def process_line(self, raw: bytes) -> None:
+        if time.monotonic() < self._scenario_hold_until:
+            return
         reading = parse_reading_line(
             raw.decode("ascii"), self.node_id, self.reference_distance_cm
         )
+        received_at = datetime.fromtimestamp(self.clock(), tz=timezone.utc)
+        if abs((received_at - reading.timestamp).total_seconds()) > 30:
+            reading = reading.model_copy(update={"timestamp": received_at})
+        await self.send_time()
         event = self.event_service.ingest(reading)
         await self.connections.broadcast(
             {
@@ -93,6 +117,22 @@ class SerialBridge:
             }
         )
         await self.send_state(self.event_service.overall_severity())
+
+    async def send_time(self) -> None:
+        async with self._write_lock:
+            connection = self._connection
+            if connection is None or self._time_sent:
+                return
+            try:
+                command = f"TIME,{int(self.clock())}\n".encode("ascii")
+                await asyncio.to_thread(connection.write, command)
+                self._time_sent = True
+            except (OSError, ValueError) as error:
+                logger.warning("Could not sync Arduino clock: %s", error)
+                try:
+                    connection.close()
+                except Exception as close_error:
+                    logger.warning("Could not close Arduino port: %s", close_error)
 
     async def send_state(self, severity: Severity) -> None:
         async with self._write_lock:

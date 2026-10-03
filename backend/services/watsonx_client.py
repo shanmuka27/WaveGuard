@@ -123,14 +123,48 @@ def parse_explanation(text: str) -> Explanation:
         ) from error
 
 
-def load_prerecorded(event: Optional[Event] = None) -> ExplanationResult:
-    """Return the saved example response, clearly labeled as prerecorded."""
+def ground_explanation(
+    generated: Explanation, event: Event, node_sources: dict[str, str]
+) -> Explanation:
+    """Keep displayed evidence tied to detector fields, even if Granite overstates it."""
+    period = (
+        f"{event.period_seconds:g} seconds"
+        if event.period_seconds is not None
+        else "unavailable"
+    )
+    evidence = [
+        f"Detector classification: {event.classification.value}; severity: {event.severity.value}; confidence: {event.confidence:.2f}.",
+        f"Maximum peak-to-trough amplitude among affected nodes: {event.amplitude_cm:g} cm; aggregate estimated period: {period}.",
+        f"Affected nodes: {', '.join(event.affected_nodes)}; correlation score: {event.correlation_score:.2f}.",
+    ]
+    if all(node_sources.get(node_id) == "physical" for node_id in event.affected_nodes):
+        return generated.model_copy(update={"evidence": evidence})
+
+    locations = ", ".join(NODE_LOCATIONS.get(node_id, node_id) for node_id in event.affected_nodes)
+    summary = (
+        f"Demonstration event: the detector classified {event.classification.value.replace('_', ' ')} "
+        f"at {len(event.affected_nodes)} nodes and assigned {event.severity.value} severity. "
+        "At least one affected node uses simulated or unverified data."
+    )
+    warning = (
+        f"Simulation draft only: no real shoreline hazard is confirmed. If equivalent changes are "
+        f"verified by physical sensors near {locations}, advise people to avoid piers and shoreline edges."
+        if event.severity.value == "warning"
+        else "Simulation only: verify conditions with physical sensors before considering a public advisory."
+    )
+    return generated.model_copy(
+        update={"summary": summary, "evidence": evidence, "public_warning": warning}
+    )
+
+
+def load_prerecorded() -> ExplanationResult:
+    """Return the saved example with its own evidence and event identity."""
     example = json.loads(EXAMPLE_PATH.read_text(encoding="utf-8"))
     example_event = example["input"]["event"]
     return ExplanationResult(
-        event_id=event.event_id if event else example_event["event_id"],
-        severity=event.severity.value if event else example_event["severity"],
-        classification=event.classification.value if event else example_event["classification"],
+        event_id=example_event["event_id"],
+        severity=example_event["severity"],
+        classification=example_event["classification"],
         source="prerecorded",
         model_id=None,
         generated_at=datetime.now(timezone.utc),
@@ -188,7 +222,9 @@ class WatsonxClient:
             },
         ]
         try:
-            explanation = parse_explanation(self._chat(messages))
+            explanation = ground_explanation(
+                parse_explanation(self._chat(messages)), event, node_sources or {}
+            )
         except WatsonxError as error:
             self.last_error = error.message
             raise

@@ -58,7 +58,8 @@ def test_serial_loop_opens_port_and_stops_cleanly(tmp_path):
             return serial
 
         bridge = SerialBridge(
-            "fake-port", 115200, 20.0, service, connections, serial_factory=factory
+            "fake-port", 115200, 20.0, service, connections,
+            serial_factory=factory, clock=lambda: 1790985600,
         )
         task = asyncio.create_task(bridge.run())
         try:
@@ -69,7 +70,7 @@ def test_serial_loop_opens_port_and_stops_cleanly(tmp_path):
 
             await asyncio.wait_for(received(), timeout=1)
             assert opened == [("fake-port", 115200)]
-            assert serial.writes == [b"STATE,SAFE\n"]
+            assert serial.writes == [b"STATE,SAFE\n", b"TIME,1790985600\n"]
             assert connections.messages[0]["reading"]["source"] == "physical"
         finally:
             task.cancel()
@@ -85,7 +86,10 @@ def test_serial_reading_enters_detector_and_emits_alert_state(tmp_path):
         database.initialize()
         service = EventService(database)
         connections = FakeConnections()
-        bridge = SerialBridge("fake", 115200, 20.0, service, connections)
+        bridge = SerialBridge(
+            "fake", 115200, 20.0, service, connections,
+            clock=lambda: 1790985600,
+        )
         serial = FakeSerial()
         bridge._connection = serial
 
@@ -98,7 +102,9 @@ def test_serial_reading_enters_detector_and_emits_alert_state(tmp_path):
         assert len(database.latest_readings()) == 6
         assert connections.messages[-1]["reading"]["source"] == "physical"
         assert connections.messages[-1]["event"]["severity"] == "watch"
-        assert serial.writes == [b"STATE,SAFE\n", b"STATE,WATCH\n"]
+        assert serial.writes == [
+            b"TIME,1790985600\n", b"STATE,SAFE\n", b"STATE,WATCH\n"
+        ]
 
     asyncio.run(check())
 
@@ -157,5 +163,48 @@ def test_physical_reading_replaces_simulated_signal_window(tmp_path):
         assert len(service.histories["LUDINGTON-01"]) == 1
         assert service.nodes()[0].source == ReadingSource.PHYSICAL
         assert service.nodes()[0].severity == Severity.SAFE
+
+    asyncio.run(check())
+
+
+def test_unsynced_arduino_time_uses_server_receive_time(tmp_path):
+    async def check():
+        database = Database(str(tmp_path / "clock.db"))
+        database.initialize()
+        service = EventService(database)
+        serial = FakeSerial()
+        bridge = SerialBridge(
+            "fake", 115200, 20.0, service, FakeConnections(),
+            clock=lambda: 1791046800,
+        )
+        bridge._connection = serial
+        await bridge.process_line(b"READING,1791043200,6.0,0.95\n")
+
+        assert database.latest_readings()[0].timestamp.timestamp() == 1791046800
+        assert serial.writes == [b"TIME,1791046800\n", b"STATE,SAFE\n"]
+
+    asyncio.run(check())
+
+
+def test_warning_demo_holds_physical_ingestion_then_resumes(tmp_path):
+    async def check():
+        database = Database(str(tmp_path / "hold.db"))
+        database.initialize()
+        service = EventService(database)
+        connections = FakeConnections()
+        bridge = SerialBridge(
+            "fake", 115200, 20.0, service, connections,
+            clock=lambda: 1791043200, scenario_hold_seconds=30,
+        )
+        bridge._connection = FakeSerial()
+        bridge.hold_warning_scenario(Severity.WARNING)
+        await bridge.process_line(b"READING,1791043200,6.0,0.95\n")
+        assert database.latest_readings() == []
+        assert connections.messages == []
+
+        bridge._scenario_hold_until = 0
+        await bridge.process_line(b"READING,1791043201,6.0,0.95\n")
+        assert len(database.latest_readings()) == 1
+        assert connections.messages[0]["reading"]["source"] == "physical"
 
     asyncio.run(check())

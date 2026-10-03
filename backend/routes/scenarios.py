@@ -50,7 +50,9 @@ async def run_scenario(scenario: str) -> ScenarioResult:
             generated += 1
 
     latest_event = event_service.detect_event()
-    await serial_bridge.send_state(event_service.overall_severity())
+    severity = event_service.overall_severity()
+    serial_bridge.hold_warning_scenario(severity)
+    await serial_bridge.send_state(severity)
 
     await connections.broadcast(
         {

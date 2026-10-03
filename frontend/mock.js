@@ -94,10 +94,10 @@
     const kind = event.classification.replace(/_/g, " ");
     const actions = {
       warning: [
-        `Notify shoreline staff responsible for ${places}.`,
-        "Advise clearing piers, breakwalls, and the water's edge.",
-        "Confirm the physical sensor visually before public release.",
-        "Approve and publish the public advisory if conditions persist.",
+        `For a confirmed real event, notify shoreline staff responsible for ${places}.`,
+        "For a confirmed real event, advise clearing piers and breakwalls.",
+        "Verify node readings before public release.",
+        "For a confirmed real event, have an operator review any public advisory before release.",
       ],
       watch: [
         `Check the sensor and conditions at ${places}.`,
@@ -107,7 +107,7 @@
       safe: ["Continue routine monitoring."],
     };
     return {
-      summary: `The detector classified a ${kind} event with ${event.severity} severity affecting ${places}.`,
+      summary: `In this simulated demonstration, the detector classified a ${kind} event with ${event.severity} severity affecting ${places}.`,
       evidence: [
         `${event.affected_nodes.length} node(s) affected: ${places}.`,
         `Amplitude ${event.amplitude_cm.toFixed(2)} cm; period ${period}.`,
@@ -116,7 +116,7 @@
       recommended_actions: actions[event.severity] || actions.safe,
       public_warning:
         event.severity === "warning"
-          ? `Water levels near ${places} are changing quickly. Stay off piers and away from the water's edge until officials say it is safe.`
+          ? `Simulation draft: If confirmed by real sensors, rapidly changing water levels near ${places} would warrant keeping people off piers and away from the water's edge.`
           : "No public warning is recommended at this time.",
     };
   }
@@ -129,6 +129,7 @@
       this.onMessage = () => {};
       this.physical = physical;
       this.bootedAt = Date.now();
+      this.physicalHoldUntil = 0;
     }
 
     subscribe(onMessage, onStatus) {
@@ -139,6 +140,7 @@
 
     // Imitates the Arduino: 1 Hz still-water readings stamped with its unsynced clock.
     emitPhysicalReading() {
+      if (Date.now() < this.physicalHoldUntil) return;
       const reading = {
         node_id: "LUDINGTON-01",
         timestamp: new Date(ARDUINO_BASE_EPOCH_MS + (Date.now() - this.bootedAt)).toISOString(),
@@ -183,6 +185,10 @@
     async runScenario(scenario) {
       const spec = SCENARIO_RESULTS[scenario];
       if (!spec) throw new Error(`Unknown scenario ${scenario}`);
+      // Mirror the backend's brief demo hold so a fake physical sample cannot
+      // immediately replace the simulated warning.
+      this.physicalHoldUntil =
+        spec.event?.severity === "warning" ? Date.now() + 30000 : 0;
       await delay(250);
 
       const start = Date.now() - 11000;
@@ -228,12 +234,11 @@
       };
     }
 
-    async example(eventId) {
-      const event = this.events.find((item) => item.event_id === eventId);
+    async example() {
       return {
-        event_id: event ? event.event_id : "evt-example01",
-        severity: event ? event.severity : "warning",
-        classification: event ? event.classification : "seiche_like",
+        event_id: "evt-example01",
+        severity: "warning",
+        classification: "seiche_like",
         source: "prerecorded",
         model_id: null,
         generated_at: new Date().toISOString(),

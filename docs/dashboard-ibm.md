@@ -26,7 +26,7 @@ If the backend is unreachable, the page shows a banner with **Retry** and **Use 
 - The dashboard listens on `/ws/live` for `reading` and `scenario_complete` messages and reconnects automatically.
 - While the socket is down it polls `/api/nodes`, `/api/readings/latest`, and `/api/events/latest` every 3 seconds and shows **Polling REST**.
 - Scenario runs label all three nodes `simulated`. `LUDINGTON-01` shows `physical` only while Arduino readings arrive. When a node's source changes, its chart line restarts, matching the backend's fresh signal window.
-- The Arduino stamps readings from its own clock, which is unsynced unless it receives `TIME,<epoch>`. Live physical readings more than 30 seconds off are plotted at receive time, and the chart header says so.
+- The backend sends `TIME,<epoch>` after the first physical reading and stores a badly skewed reading at server receive time. The chart also handles an unsynced stream directly, as shown in `?mock=1&physical=1`.
 - When live sensor readings make the detector re-report a different event, the last Granite explanation stays visible with an "Explains earlier event" note. Starting a new scenario clears it.
 - Network severity is the highest node severity, raised to the event severity for affected nodes while the event is still active (at least one affected node is not `safe`). A per-node seiche reading is `watch`; the correlated event makes it a network `warning`.
 
@@ -97,6 +97,7 @@ Until this is added, the dashboard still works and shows **IBM Granite: Route mi
 5. Restart the backend and check `GET /api/ibm/status` returns `"configured": true`.
 
 The client (`backend/services/watsonx_client.py`) calls the watsonx.ai chat REST API directly with an IAM token, sends only the stored event plus node source labels, validates the JSON with Pydantic, and caches one explanation per event so repeated clicks during the demo do not call IBM again.
+Displayed evidence always comes from the detector's event fields. When any affected node is simulated or its source is unknown, the backend labels the explanation as a demonstration and makes the public warning draft conditional on field verification. Granite still supplies recommended actions.
 
 ## Prompt and fallback files
 

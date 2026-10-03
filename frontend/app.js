@@ -162,8 +162,8 @@
       });
     }
 
-    example(eventId) {
-      return this.request(`/api/ibm/example?event_id=${encodeURIComponent(eventId || "")}`);
+    example() {
+      return this.request("/api/ibm/example");
     }
 
     subscribe(onMessage, onStatus) {
@@ -253,6 +253,7 @@
   }
 
   function addReading(reading) {
+    if (reading.source !== "physical") state.clockOffsets.delete(reading.node_id);
     let entry = state.series.get(reading.node_id);
     if (!entry || entry.source !== reading.source) {
       // Matches the backend: a source switch starts a fresh signal window.
@@ -476,7 +477,7 @@
 
   async function showPrerecorded() {
     try {
-      state.explanation = await api.example(state.event && state.event.event_id);
+      state.explanation = await api.example();
       state.explainState = "done";
     } catch (error) {
       state.explainError = { code: "prerecorded_unavailable", message: `Prerecorded example unavailable: ${error.message}` };
@@ -613,7 +614,9 @@
     chartView.setSeries(series);
     $("chart-empty").hidden = series.size > 0;
 
-    const unsynced = [...state.clockOffsets.keys()].filter((nodeId) => state.series.has(nodeId));
+    const unsynced = [...state.clockOffsets.keys()].filter(
+      (nodeId) => state.series.get(nodeId)?.source === "physical"
+    );
     $("chart-note").textContent = unsynced.length
       ? `Dashed lines are simulated · ${unsynced.join(", ")} clock not synced, plotted at receive time`
       : "Dashed lines are simulated nodes";
@@ -750,12 +753,12 @@
       state.explanation && state.event && state.explanation.event_id === state.event.event_id
     );
     button.textContent = loading
-      ? "Asking Granite…"
+      ? state.mode === "mock" ? "Generating mock explanation…" : "Asking Granite…"
       : state.explanation && !explainsCurrent
-        ? "Explain latest event"
+        ? state.mode === "mock" ? "Explain latest mock event" : "Explain latest event"
         : state.explanation && state.explanation.source === "granite"
           ? "Regenerate"
-          : "Explain with Granite";
+          : state.mode === "mock" ? "Generate mock explanation" : "Explain with Granite";
 
     const model = $("ibm-model");
     model.hidden = !state.ibm.modelId;
@@ -769,7 +772,12 @@
           h("div", { class: "loading-line" }),
           h("div", { class: "loading-line" }),
           h("div", { class: "loading-line" }),
-          h("p", { class: "muted small", text: `Sending ${state.event.event_id} to IBM watsonx.ai…` })
+          h("p", {
+            class: "muted small",
+            text: state.mode === "mock"
+              ? `Generating a local explanation for ${state.event.event_id}…`
+              : `Sending ${state.event.event_id} to IBM watsonx.ai…`,
+          })
         )
       );
       return;
@@ -807,9 +815,11 @@
           ? h("p", {
               class: "stale-note",
               role: "note",
-              text: `Explains earlier event ${state.explanation.event_id}. The detector now reports ${
-                CLASSIFICATION_LABELS[state.event.classification] || state.event.classification
-              } · ${state.event.severity} (${state.event.event_id}).`,
+              text: state.explanation.source === "prerecorded"
+                ? `Saved example ${state.explanation.event_id} does not describe the current event ${state.event.event_id}.`
+                : `Explains earlier event ${state.explanation.event_id}. The detector now reports ${
+                    CLASSIFICATION_LABELS[state.event.classification] || state.event.classification
+                  } · ${state.event.severity} (${state.event.event_id}).`,
             })
           : null;
       body.replaceChildren(...[staleNote, ...explanationView(state.explanation)].filter(Boolean));
