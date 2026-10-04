@@ -34,6 +34,9 @@ Data sources, disclosed on the dashboard chart:
 - **Sudden surge and local disturbance** are synthetic: 6-minute gauge readings average sudden surges away, and no gauge records a splash.
 - **Ludington in a scenario** gets data shaped like its tray sensor (same zero, below the blind spot, 0.43 cm steps). It is drawn solid and labeled **Scenario**. In Manual it is the live sensor, labeled **Physical**.
 - **Calibrate zero** (admin page, Manual mode, still water) sets `REFERENCE_DISTANCE_CM` from the last 15 s of good readings and saves it to `.env`.
+- **Raw sensor view** (admin page) switches every open dashboard's chart to the tray sensor alone: measured distance from the sensor, unsmoothed, one dot per reading, missed echoes as gaps (`PUT /api/view?sensor_only=true`, which also starts Manual mode from the admin page).
+
+Phone access: `start-demo-phone.bat` prints the laptop's address on the current network. Campus Wi-Fi often blocks device-to-device traffic and can expose the laptop widely; a phone hotspot is more reliable and keeps the unauthenticated admin page private.
 
 ### Live updates
 

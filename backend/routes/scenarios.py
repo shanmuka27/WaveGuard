@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/scenarios", tags=["scenarios"])
 board_router = APIRouter(prefix="/api/board", tags=["board"])
 sensor_router = APIRouter(prefix="/api/sensor", tags=["sensor"])
+view_router = APIRouter(prefix="/api/view", tags=["view"])
 
 # "manual" is the live mode: the physical station shows real sensor readings while
 # every other node replays a calm real record.
@@ -264,7 +265,8 @@ async def run_scenario(
             generated += 1
 
     latest_event = event_service.detect_event()
-    await serial_bridge.set_board_node(location)
+    await serial_bridge.set_board_node(location)  # the board reacts first
+    await asyncio.to_thread(event_service.flush_readings)  # then one batch save
 
     await connections.broadcast(
         {
@@ -328,6 +330,8 @@ async def trigger_neighbor_response() -> ScenarioResult:
             "type": "reading", "reading": simulated.model_dump(mode="json"), "event": None,
         })
     await serial_bridge.set_board_node(PHYSICAL_NODE)
+    # Pages reload readings on scenario_complete: save the batch first.
+    await asyncio.to_thread(event_service.flush_readings)
     await connections.broadcast({
         "type": "scenario_complete", "scenario": "neighbor_response",
         "location": PHYSICAL_NODE, "source_note": note,
@@ -402,7 +406,7 @@ def sensor_status() -> dict:
 
 
 @sensor_router.post("/calibrate")
-def calibrate_zero() -> dict:
+async def calibrate_zero() -> dict:
     """Make the surface the sensor sees right now read as 0 cm (manual mode, still water)."""
     if serial_bridge.holding():
         raise HTTPException(status_code=409, detail="Switch to manual mode first.")
@@ -423,8 +427,31 @@ def calibrate_zero() -> dict:
     serial_bridge.reference_distance_cm = new_reference
     _persist_reference(new_reference)
     event_service.reset_live_state()  # start a fresh window at the new zero
+    await connections.broadcast({"type": "view", **_view_payload()})
     return {
         "reference_distance_cm": new_reference,
         "samples": len(distances),
         "spread_cm": round(max(distances) - min(distances), 2),
     }
+
+
+# Dashboard view shared by every open dashboard: "sensor_only" plots just the raw
+# readings of the physical sensor (distance from sensor, no other nodes).
+_view = {"sensor_only": False}
+
+
+def _view_payload() -> dict:
+    return {**_view, "reference_distance_cm": serial_bridge.reference_distance_cm}
+
+
+@view_router.get("")
+def dashboard_view() -> dict:
+    return _view_payload()
+
+
+@view_router.put("")
+async def set_dashboard_view(sensor_only: bool = Query(...)) -> dict:
+    _view["sensor_only"] = sensor_only
+    payload = _view_payload()
+    await connections.broadcast({"type": "view", **payload})
+    return payload

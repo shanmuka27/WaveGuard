@@ -40,3 +40,18 @@ def test_oscillating_signal_is_seiche_like() -> None:
     values = [14.0 + 3.5 * sin(index * pi / 3) for index in range(12)]
     assessment = classify_node(make_readings(values))
     assert assessment.classification == EventClassification.SEICHE_LIKE
+
+
+def test_batched_writes_save_every_reading_once_flushed(tmp_path) -> None:
+    from backend.database import Database
+    from backend.services.event_service import EventService
+
+    database = Database(str(tmp_path / "batched.db"))
+    database.initialize()
+    service = EventService(database, batch_writes=True)
+    for reading in make_readings([14.0 + i * 0.1 for i in range(30)]):
+        service.ingest(reading, detect=False)
+
+    service.flush_readings()
+
+    assert len(database.latest_readings(100)) == 30

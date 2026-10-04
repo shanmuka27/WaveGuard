@@ -158,6 +158,28 @@
     }
   }
 
+  // Raw sensor view: the dashboard plots only the tray sensor's own readings.
+  function showRawView(on) {
+    const button = $("raw-view-button");
+    button.setAttribute("aria-pressed", String(on));
+    button.textContent = `Raw sensor view: ${on ? "on" : "off"}`;
+    button.classList.toggle("primary", on);
+  }
+
+  async function toggleRawView() {
+    const on = $("raw-view-button").getAttribute("aria-pressed") !== "true";
+    try {
+      // Raw sensor data only exists in Manual mode; switch there first.
+      const sensor = await request("/api/sensor");
+      if (on && !sensor.manual) await runScenario("manual");
+      const view = await request(`/api/view?sensor_only=${on}`, "PUT");
+      showRawView(view.sensor_only);
+      logRun(view.sensor_only ? "Dashboard: raw sensor view" : "Dashboard: normal view");
+    } catch (error) {
+      $("calibrate-status").textContent = `Could not switch the view: ${error.message}`;
+    }
+  }
+
   async function calibrate() {
     $("calibrate-button").disabled = true;
     $("calibrate-status").textContent = "Calibrating… keep the water still.";
@@ -193,6 +215,8 @@
 
   async function init() {
     $("calibrate-button").addEventListener("click", calibrate);
+    $("raw-view-button").addEventListener("click", toggleRawView);
+    request("/api/view").then((view) => showRawView(view.sensor_only)).catch(() => {});
     $("neighbor-button").addEventListener("click", triggerNeighbors);
     document.querySelectorAll("[data-scenario]").forEach((button) => {
       button.addEventListener("click", () => runScenario(button.dataset.scenario));

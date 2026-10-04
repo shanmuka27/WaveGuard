@@ -198,6 +198,10 @@
       return this.eventLog.at(-1) || null;
     }
 
+    async view() {
+      return { sensor_only: false, reference_distance_cm: null };
+    }
+
     async currentScenario() {
       return null;
     }

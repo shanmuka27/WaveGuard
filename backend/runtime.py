@@ -6,7 +6,8 @@ from backend.serial_bridge import SerialBridge
 from backend.services.event_service import EventService
 
 database = TigerDatabase(settings.tiger_database_url) if settings.tiger_database_url else Database(settings.database_path)
-event_service = EventService(database)
+# Remote storage gets batched background writes; local SQLite stays synchronous.
+event_service = EventService(database, batch_writes=database.storage == "tiger_data")
 connections = ConnectionManager()
 serial_bridge = SerialBridge(
     settings.serial_port,

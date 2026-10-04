@@ -60,6 +60,13 @@ class Database:
                 (reading.node_id, reading.timestamp.isoformat(), reading.model_dump_json()),
             )
 
+    def save_readings(self, readings: list[Reading]) -> None:
+        with self.connect() as connection:
+            connection.executemany(
+                "INSERT INTO readings(node_id, timestamp, payload) VALUES (?, ?, ?)",
+                [(r.node_id, r.timestamp.isoformat(), r.model_dump_json()) for r in readings],
+            )
+
     def save_event(self, event: Event) -> None:
         self.save_event_with_readings(event, [])
 

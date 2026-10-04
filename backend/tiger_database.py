@@ -70,6 +70,14 @@ class TigerDatabase:
                 (reading.timestamp, reading.node_id, reading.water_level_cm, reading.quality, reading.source.value),
             )
 
+    def save_readings(self, readings: list[Reading]) -> None:
+        # One transaction and one pipelined round trip for the whole batch.
+        with self.pool.connection() as connection, connection.cursor() as cursor:
+            cursor.executemany(
+                "INSERT INTO readings(timestamp, node_id, water_level_cm, quality, source) VALUES (%s, %s, %s, %s, %s)",
+                [(r.timestamp, r.node_id, r.water_level_cm, r.quality, r.source.value) for r in readings],
+            )
+
     def save_event(self, event: Event) -> None:
         self.save_event_with_readings(event, [])
 

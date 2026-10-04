@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import threading
+import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Optional, Tuple
@@ -10,9 +13,64 @@ from backend.detection.node_correlator import correlate
 from backend.schemas import Event, EventClassification, NodeStatus, Reading, Severity
 
 
-class EventService:
-    def __init__(self, database: Database, window_size: int = 24) -> None:
+logger = logging.getLogger(__name__)
+
+
+class ReadingWriter:
+    """Saves readings on a background thread, in batches.
+
+    A remote store such as Tiger Data costs a network round trip per insert; saving
+    each reading inline took ~9 s for a 72-reading scenario switch and blocked the
+    event loop (and the alert board) meanwhile. Batching makes it one round trip
+    per burst, off the event loop.
+    """
+
+    def __init__(self, database: Database, gather_seconds: float = 0.25) -> None:
         self.database = database
+        self.gather_seconds = gather_seconds
+        self._pending: list[Reading] = []
+        self._in_flight = 0
+        self._changed = threading.Condition()
+        threading.Thread(target=self._run, name="reading-writer", daemon=True).start()
+
+    def put(self, reading: Reading) -> None:
+        with self._changed:
+            self._pending.append(reading)
+            self._changed.notify_all()
+
+    def flush(self, timeout: float = 15.0) -> None:
+        """Block until every reading queued so far is saved."""
+        deadline = time.monotonic() + timeout
+        with self._changed:
+            while self._pending or self._in_flight:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not self._changed.wait(remaining):
+                    break
+
+    def _run(self) -> None:
+        while True:
+            with self._changed:
+                while not self._pending:
+                    self._changed.wait()
+            time.sleep(self.gather_seconds)  # let a burst accumulate
+            with self._changed:
+                batch, self._pending = self._pending, []
+                self._in_flight = len(batch)
+            try:
+                self.database.save_readings(batch)
+            except Exception:
+                logger.exception("Could not save %d readings", len(batch))
+            with self._changed:
+                self._in_flight = 0
+                self._changed.notify_all()
+
+
+class EventService:
+    def __init__(
+        self, database: Database, window_size: int = 24, batch_writes: bool = False
+    ) -> None:
+        self.database = database
+        self.writer = ReadingWriter(database) if batch_writes else None
         self.histories: dict[str, deque[Reading]] = defaultdict(
             lambda: deque(maxlen=window_size)
         )
@@ -37,7 +95,10 @@ class EventService:
             self.severity_by_node.pop(node_id, None)
 
     def ingest(self, reading: Reading, detect: bool = True) -> Optional[Event]:
-        self.database.save_reading(reading)
+        if self.writer is not None:
+            self.writer.put(reading)
+        else:
+            self.database.save_reading(reading)
         previous = self.latest_by_node.get(reading.node_id)
         if previous is not None and previous.source != reading.source:
             # A real sensor replacing a simulated feed must start a fresh signal window.
@@ -46,6 +107,11 @@ class EventService:
         self.histories[reading.node_id].append(reading)
         self.latest_by_node[reading.node_id] = reading
         return self.detect_event() if detect else None
+
+    def flush_readings(self) -> None:
+        """Wait until queued readings are saved (before pages reload them)."""
+        if self.writer is not None:
+            self.writer.flush()
 
     def detect_event(self) -> Optional[Event]:
         assessments = [

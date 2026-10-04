@@ -11,6 +11,7 @@
   const API_BASE_URL = (params.get("api") || defaultApi).replace(/\/+$/, "");
   const WS_URL = `${API_BASE_URL.replace(/^http/, "ws")}/ws/live`;
 
+  const PHYSICAL_STATION = "LUDINGTON-01";
   const SCENARIO_READING_COUNT = 72; // 12 steps x 6 nodes, see backend/routes/scenarios.py
   const MAX_POINTS_PER_NODE = 120;
   const CHART_WINDOW_MS = 2 * 60 * 1000;
@@ -63,6 +64,8 @@
     replayLoading: false,
     replayError: null,
     sourceNote: null, // what the running scenario replays (NOAA records, synthetic parts)
+    sensorOnly: false, // admin "Raw sensor view": plot only the physical sensor's readings
+    referenceCm: null, // sensor-to-zero distance, to turn levels back into measured distance
     clockOffsets: new Map(), // node_id -> ms added to unsynced physical timestamps
     explainToken: 0,
   };
@@ -170,6 +173,10 @@
 
     replay(eventId) {
       return this.request(`/api/events/${encodeURIComponent(eventId)}/replay`);
+    }
+
+    view() {
+      return this.request("/api/view");
     }
 
     currentScenario() {
@@ -471,14 +478,16 @@
   }
 
   async function refreshAll({ live = false } = {}) {
-    const [nodes, readings, event, history, scenario] = await Promise.all([
+    const [nodes, readings, event, history, scenario, view] = await Promise.all([
       api.nodes(),
       api.latestReadings(SCENARIO_READING_COUNT),
       api.latestEvent(),
       api.events(HISTORY_FETCH_LIMIT),
       api.currentScenario().catch(() => null),
+      api.view().catch(() => null),
     ]);
     state.sourceNote = scenario ? scenario.source_note : state.sourceNote;
+    if (view) applyView(view);
     state.nodes = new Map(nodes.map((node) => [node.node_id, node]));
     state.history = history;
     replaceSeries(readings);
@@ -537,6 +546,9 @@
         Promise.all([reloadReadings(), refreshNodes(), refreshHistory()])
           .then(scheduleRender)
           .catch(handleBackendError);
+        break;
+      case "view":
+        applyView(message);
         break;
       case "event":
         if (message.event) setEvent(message.event, { fromLive: true });
@@ -799,7 +811,51 @@
     );
   }
 
+  function applyView(view) {
+    state.sensorOnly = Boolean(view.sensor_only);
+    const reference = view.reference_distance_cm ?? state.referenceCm;
+    // A new zero (Calibrate zero) changes how stored levels map back to distance:
+    // restart the physical trace rather than redraw old points at the new zero.
+    if (state.referenceCm != null && reference !== state.referenceCm) state.series.delete(PHYSICAL_STATION);
+    state.referenceCm = reference;
+  }
+
+  // Raw sensor view: only the physical sensor, plotted as the distance it measures.
+  function renderRawSensorChart() {
+    const entry = state.series.get(PHYSICAL_STATION);
+    const live = entry && entry.source === "physical" ? entry : null;
+    const newest = live ? live.points.at(-1)?.x ?? 0 : 0;
+    const reference = state.referenceCm;
+    const points = live
+      ? live.points
+          .filter((point) => point.x >= newest - CHART_WINDOW_MS)
+          .map((point) => ({ x: point.x, y: point.y === null || reference == null ? null : reference - point.y }))
+      : [];
+    const series = new Map(
+      points.length ? [[PHYSICAL_STATION, { source: "physical", label: "Ludington sensor: distance to surface (cm)", points }]] : []
+    );
+    chartView.setSeries(series, { yTitle: "distance from sensor (cm)", raw: true, minSpan: 4 });
+    $("chart-title").textContent = "Raw sensor · Ludington";
+    $("chart-empty").hidden = series.size > 0;
+    $("chart-empty").textContent = "Waiting for live sensor readings (Manual mode)…";
+
+    const recent = points.slice(-30);
+    const missed = recent.filter((point) => point.y === null).length;
+    const latest = [...points].reverse().find((point) => point.y !== null);
+    const notes = ["Live readings from the tray sensor only, one per second, unsmoothed"];
+    if (latest) notes.push(`latest ${latest.y.toFixed(1)} cm from the sensor`);
+    if (reference != null) notes.push(`calm water = ${reference} cm`);
+    if (missed) notes.push(`${missed} of last ${recent.length} readings had no echo (gaps)`);
+    $("chart-note").textContent = notes.join(" · ");
+  }
+
   function renderChart() {
+    if (state.sensorOnly) {
+      renderRawSensorChart();
+      return;
+    }
+    $("chart-title").textContent = "Water level (cm)";
+    $("chart-empty").textContent = "No readings yet. Run a scenario to begin.";
     // Show a rolling window ending at the newest reading, so stale lines from an
     // earlier scenario can't stretch the time axis and squash the live sensor.
     // During an active event, show only the locations it affects.
@@ -817,7 +873,7 @@
         })
         .filter(([, entry]) => entry.points.length > 0)
     );
-    chartView.setSeries(series);
+    chartView.setSeries(series, { yTitle: "cm" });
     $("chart-empty").hidden = series.size > 0;
 
     const unsynced = [...state.clockOffsets.keys()].filter(

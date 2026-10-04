@@ -60,7 +60,20 @@
       },
     });
 
-    function setSeries(series) {
+    // raw: straight segments with a dot per reading; minSpan: smallest y range
+    // shown, so sensor jitter is not magnified into fake waves.
+    function setSeries(series, { yTitle = "cm", raw = false, minSpan = null } = {}) {
+      chart.options.scales.y.title.text = yTitle;
+      const values = [...series.values()].flatMap((entry) => entry.points.map((p) => p.y)).filter((y) => y !== null);
+      if (minSpan && values.length) {
+        const mid = (Math.min(...values) + Math.max(...values)) / 2;
+        const half = Math.max(minSpan, Math.max(...values) - Math.min(...values) + 0.5) / 2;
+        chart.options.scales.y.min = Math.floor((mid - half) * 2) / 2;
+        chart.options.scales.y.max = Math.ceil((mid + half) * 2) / 2;
+      } else {
+        delete chart.options.scales.y.min;
+        delete chart.options.scales.y.max;
+      }
       const datasets = [];
       let index = 0;
       for (const [nodeId, entry] of series) {
@@ -72,15 +85,15 @@
         const simulated = !live && !station;
         const kind = live ? "live sensor" : station ? "simulated scenario" : entry.source || "unknown";
         datasets.push({
-          label: `${nodeId} (${kind})`,
+          label: entry.label || `${nodeId} (${kind})`,
           data: entry.points,
           borderColor: color,
           backgroundColor: color,
           borderWidth: simulated ? 2 : 3,
           borderDash: simulated ? [6, 4] : [],
-          pointRadius: 0,
+          pointRadius: raw ? 2.5 : 0,
           pointHitRadius: 6,
-          tension: 0.3,
+          tension: raw ? 0 : 0.3,
         });
         index += 1;
       }
