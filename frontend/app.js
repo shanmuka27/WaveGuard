@@ -3,11 +3,23 @@
 // data, and ?mock=1&physical=1 to add a fake 1 Hz Arduino stream for LUDINGTON-01.
 (function () {
   const params = new URLSearchParams(window.location.search);
-  const API_BASE_URL = (params.get("api") || "http://127.0.0.1:8000").replace(/\/+$/, "");
+  // The backend runs on the same machine that served this page (127.0.0.1 locally,
+  // the laptop's network address when opened from a phone in phone mode).
+  const defaultApi = window.location.protocol.startsWith("http")
+    ? `${window.location.protocol}//${window.location.hostname}:8000`
+    : "http://127.0.0.1:8000";
+  const API_BASE_URL = (params.get("api") || defaultApi).replace(/\/+$/, "");
   const WS_URL = `${API_BASE_URL.replace(/^http/, "ws")}/ws/live`;
 
-  const SCENARIO_READING_COUNT = 36; // 12 steps x 3 nodes, see backend/routes/scenarios.py
+  const SCENARIO_READING_COUNT = 72; // 12 steps x 6 nodes, see backend/routes/scenarios.py
   const MAX_POINTS_PER_NODE = 120;
+  const CHART_WINDOW_MS = 2 * 60 * 1000;
+  const HISTORY_FETCH_LIMIT = 60;
+  const HISTORY_ROWS = 12;
+  const HISTORY_REFRESH_DEBOUNCE_MS = 800;
+  // The firmware reports quality 0.10 for a missed echo and 0.50 for an out-of-range target.
+  const MIN_PLOTTED_QUALITY = 0.5;
+  const isUsableReading = (reading) => reading.quality > MIN_PLOTTED_QUALITY;
   const POLL_INTERVAL_MS = 3000;
   const NODES_REFRESH_DEBOUNCE_MS = 400;
   const CLOCK_SKEW_TOLERANCE_MS = 30000;
@@ -21,9 +33,12 @@
     sensor_fault: "Sensor fault",
   };
   const NODE_META = {
-    "LUDINGTON-01": { location: "Ludington", lat: 43.9553, lng: -86.4526, color: "#4fd1e8" },
-    "MUSKEGON-02": { location: "Muskegon", lat: 43.2342, lng: -86.2484, color: "#b69cff" },
-    "HOLLAND-03": { location: "Holland", lat: 42.7725, lng: -86.2119, color: "#ff8fb8" },
+    "LUDINGTON-01": { location: "Ludington", labelSide: "right", physicalStation: true, lat: 43.9553, lng: -86.4526, color: "#4fd1e8" },
+    "MUSKEGON-02": { location: "Muskegon", labelSide: "left", lat: 43.2342, lng: -86.2484, color: "#b69cff" },
+    "HOLLAND-03": { location: "Holland", labelSide: "left", lat: 42.7725, lng: -86.2119, color: "#ff8fb8" },
+    "GRANDHAVEN-04": { location: "Grand Haven", labelSide: "right", lat: 43.0567, lng: -86.2486, color: "#7aa7ff" },
+    "SOUTHHAVEN-05": { location: "South Haven", labelSide: "right", lat: 42.4031, lng: -86.2861, color: "#9fe3c4" },
+    "MANISTEE-06": { location: "Manistee", labelSide: "left", lat: 44.2483, lng: -86.3439, color: "#f4b6a0" },
   };
 
   const state = {
@@ -41,6 +56,8 @@
     runningScenario: null,
     lastScenario: null,
     lastUpdate: null,
+    history: [], // newest first, from GET /api/events
+    sourceNote: null, // what the running scenario replays (NOAA records, synthetic parts)
     clockOffsets: new Map(), // node_id -> ms added to unsynced physical timestamps
     explainToken: 0,
   };
@@ -71,8 +88,12 @@
   const eventSignature = (event) =>
     event ? `${event.classification}|${[...event.affected_nodes].sort().join(",")}|${event.severity}` : null;
 
-  function sourceTag(source) {
+  function sourceTag(source, nodeId) {
     if (source === "physical") return h("span", { class: "tag physical", text: "Physical" });
+    // The physical station playing a demo scenario: generated data, solid styling.
+    if (source === "simulated" && (NODE_META[nodeId] || {}).physicalStation) {
+      return h("span", { class: "tag physical", text: "Scenario" });
+    }
     if (source === "simulated") return h("span", { class: "tag simulated", text: "Simulated" });
     return h("span", { class: "tag unknown-source", text: "No data" });
   }
@@ -138,6 +159,14 @@
       return this.request(`/api/readings/latest?limit=${limit}`);
     }
 
+    events(limit) {
+      return this.request(`/api/events?limit=${limit}`);
+    }
+
+    currentScenario() {
+      return this.request("/api/scenarios/current");
+    }
+
     async latestEvent() {
       try {
         return await this.request("/api/events/latest");
@@ -147,8 +176,15 @@
       }
     }
 
-    runScenario(scenario) {
-      return this.request(`/api/scenarios/${encodeURIComponent(scenario)}`, {
+    // Which location the physical alert board shows; "" = whole network.
+    setBoardLocation(location) {
+      const query = location ? `?location=${encodeURIComponent(location)}` : "";
+      return this.request(`/api/board${query}`, { method: "PUT" });
+    }
+
+    runScenario(scenario, location) {
+      const query = location ? `?location=${encodeURIComponent(location)}` : "";
+      return this.request(`/api/scenarios/${encodeURIComponent(scenario)}${query}`, {
         method: "POST",
         timeoutMs: 15000,
       });
@@ -200,6 +236,10 @@
       connect();
     }
   }
+
+  // Live demos are driven from admin.html; the dashboard shows its own scenario
+  // controls only in mock mode, where there is no backend for admin.html to drive.
+  const DEMO_CONTROLS = state.mode === "mock";
 
   const api = state.mode === "mock" ? new window.WaveGuardMock.MockApi({ physical: params.get("physical") === "1" }) : new HttpApi(API_BASE_URL);
 
@@ -261,7 +301,12 @@
       state.series.set(reading.node_id, entry);
     }
     const offset = reading.source === "physical" ? state.clockOffsets.get(reading.node_id) || 0 : 0;
-    entry.points.push({ x: Date.parse(reading.timestamp) + offset, y: reading.water_level_cm });
+    // A failed echo is not a water level: draw it as a gap so it neither spikes
+    // the line nor stretches the y-axis.
+    entry.points.push({
+      x: Date.parse(reading.timestamp) + offset,
+      y: isUsableReading(reading) ? reading.water_level_cm : null,
+    });
     entry.points.sort((a, b) => a.x - b.x);
     if (entry.points.length > MAX_POINTS_PER_NODE) {
       entry.points.splice(0, entry.points.length - MAX_POINTS_PER_NODE);
@@ -287,6 +332,30 @@
   async function refreshNodes() {
     const nodes = await api.nodes();
     state.nodes = new Map(nodes.map((node) => [node.node_id, node]));
+  }
+
+  async function refreshHistory() {
+    state.history = await api.events(HISTORY_FETCH_LIMIT);
+  }
+
+  let historyRefreshTimer = null;
+  function scheduleHistoryRefresh() {
+    clearTimeout(historyRefreshTimer);
+    historyRefreshTimer = setTimeout(async () => {
+      try {
+        await refreshHistory();
+        scheduleRender();
+      } catch (error) {
+        handleBackendError(error);
+      }
+    }, HISTORY_REFRESH_DEBOUNCE_MS);
+  }
+
+  // Review a past event: it replaces the evidence panel and clears any explanation
+  // of a different event, so "Explain with Granite" then explains this one.
+  function selectHistoryEvent(event) {
+    setEvent(event, { newRun: true });
+    render();
   }
 
   let nodesRefreshTimer = null;
@@ -335,12 +404,16 @@
   }
 
   async function refreshAll({ live = false } = {}) {
-    const [nodes, readings, event] = await Promise.all([
+    const [nodes, readings, event, history, scenario] = await Promise.all([
       api.nodes(),
       api.latestReadings(SCENARIO_READING_COUNT),
       api.latestEvent(),
+      api.events(HISTORY_FETCH_LIMIT),
+      api.currentScenario().catch(() => null),
     ]);
+    state.sourceNote = scenario ? scenario.source_note : state.sourceNote;
     state.nodes = new Map(nodes.map((node) => [node.node_id, node]));
+    state.history = history;
     replaceSeries(readings);
     setEvent(event, { fromLive: live });
     setBackend("online");
@@ -385,12 +458,16 @@
           trackClockSkew(message.reading);
           addReading(message.reading);
         }
-        if (message.event) setEvent(message.event, { fromLive: true });
+        if (message.event) {
+          setEvent(message.event, { fromLive: true });
+          scheduleHistoryRefresh();
+        }
         scheduleNodesRefresh();
         break;
       case "scenario_complete":
+        state.sourceNote = message.source_note || null;
         setEvent(message.event, { fromLive: true, newRun: true });
-        Promise.all([reloadReadings(), refreshNodes()])
+        Promise.all([reloadReadings(), refreshNodes(), refreshHistory()])
           .then(scheduleRender)
           .catch(handleBackendError);
         break;
@@ -421,14 +498,43 @@
 
   // ---------- Actions ----------
 
+  // The scenario's center: a node id, or "" for the whole shoreline.
+  function scenarioLocation() {
+    return $("scenario-location").value;
+  }
+
+  function locationName(nodeId) {
+    return nodeId ? (NODE_META[nodeId] || {}).location || nodeId : "the whole shoreline";
+  }
+
+  function selectLocation(nodeId) {
+    $("scenario-location").value = nodeId;
+    renderNodes();
+    syncBoardLocation();
+  }
+
+  // The physical board stands in for the selected location's own alert board.
+  async function syncBoardLocation() {
+    const location = scenarioLocation();
+    try {
+      await api.setBoardLocation(location || null);
+      $("scenario-status").textContent = `Board now shows ${locationName(location)}.`;
+    } catch (error) {
+      $("scenario-status").textContent = `Could not switch the board: ${error.message}`;
+      handleBackendError(error);
+    }
+  }
+
   async function runScenario(scenario) {
     if (state.runningScenario) return;
     state.runningScenario = scenario;
-    $("scenario-status").textContent = `Running ${scenario.replace(/_/g, " ")}…`;
+    const location = scenarioLocation();
+    const label = `${scenario.replace(/_/g, " ")} at ${locationName(location)}`;
+    $("scenario-status").textContent = `Running ${label}…`;
     resetExplanation();
     render();
     try {
-      const result = await api.runScenario(scenario);
+      const result = await api.runScenario(scenario, location || null);
       setEvent(result.event, { fromLive: true, newRun: true });
       await Promise.all([reloadReadings(result.readings_generated || SCENARIO_READING_COUNT), refreshNodes()]);
       state.lastScenario = scenario;
@@ -437,7 +543,7 @@
       const outcome = result.event
         ? `${CLASSIFICATION_LABELS[result.event.classification] || result.event.classification} · ${result.event.severity}`
         : "no hazard event";
-      $("scenario-status").textContent = `${scenario.replace(/_/g, " ")} complete: ${outcome}.`;
+      $("scenario-status").textContent = `${label} complete: ${outcome}.`;
     } catch (error) {
       $("scenario-status").textContent = `Scenario failed: ${error.message}`;
       handleBackendError(error);
@@ -548,6 +654,19 @@
     }
     $("summary-text").textContent = text;
 
+    // The affected towns, by name, so the severity box reads at a glance.
+    const affected = isEventActive() ? state.event.affected_nodes : [];
+    $("summary-places").replaceChildren(
+      ...affected.map((nodeId) =>
+        h(
+          "li",
+          { class: `place ${effectiveSeverity(nodeId)}` },
+          h("span", { class: "place-name", text: (NODE_META[nodeId] || {}).location || nodeId }),
+          h("span", { class: "place-id", text: nodeId })
+        )
+      )
+    );
+
     const nodes = [...state.nodes.values()];
     $("stat-nodes").textContent = nodes.length;
     $("stat-physical").textContent = nodes.filter((node) => node.source === "physical").length;
@@ -575,6 +694,7 @@
         source: node ? node.source : null,
         severity: effectiveSeverity(nodeId),
         level: node && node.last_reading ? node.last_reading.water_level_cm : null,
+        usable: Boolean(node && node.last_reading && isUsableReading(node.last_reading)),
       };
     });
     mapView.update(rows);
@@ -583,7 +703,13 @@
       ...rows.map((row) =>
         h(
           "li",
-          { class: "node-row" },
+          DEMO_CONTROLS
+            ? {
+                class: `node-row selectable${row.node_id === scenarioLocation() ? " chosen" : ""}`,
+                title: `Center demo scenarios on ${locationName(row.node_id)}`,
+                onclick: () => selectLocation(row.node_id),
+              }
+            : { class: "node-row" },
           h("span", { class: "swatch", style: `background:${(NODE_META[row.node_id] || {}).color || "#5d7b8a"}` }),
           h(
             "span",
@@ -592,11 +718,11 @@
             " ",
             h("span", { class: "muted small", text: (NODE_META[row.node_id] || {}).location || "" })
           ),
-          sourceTag(row.source),
+          sourceTag(row.source, row.node_id),
           h(
             "span",
             { class: "node-level" },
-            row.level == null ? "—" : `${row.level.toFixed(2)} cm`,
+            row.level == null ? "—" : row.usable ? `${row.level.toFixed(2)} cm` : "No echo",
             " ",
             severityBadge(row.severity)
           )
@@ -606,10 +732,22 @@
   }
 
   function renderChart() {
+    // Show a rolling window ending at the newest reading, so stale lines from an
+    // earlier scenario can't stretch the time axis and squash the live sensor.
+    // During an active event, show only the locations it affects.
+    const focus = isEventActive() ? new Set(state.event.affected_nodes) : null;
+    const newest = Math.max(
+      ...[...state.series.values()].map((entry) => entry.points.at(-1)?.x ?? -Infinity)
+    );
     const series = new Map(
       orderedNodeIds()
-        .filter((nodeId) => state.series.has(nodeId))
-        .map((nodeId) => [nodeId, state.series.get(nodeId)])
+        .filter((nodeId) => state.series.has(nodeId) && (!focus || focus.has(nodeId)))
+        .map((nodeId) => {
+          const entry = state.series.get(nodeId);
+          const points = entry.points.filter((point) => point.x >= newest - CHART_WINDOW_MS);
+          return [nodeId, { ...entry, points }];
+        })
+        .filter(([, entry]) => entry.points.length > 0)
     );
     chartView.setSeries(series);
     $("chart-empty").hidden = series.size > 0;
@@ -617,9 +755,19 @@
     const unsynced = [...state.clockOffsets.keys()].filter(
       (nodeId) => state.series.get(nodeId)?.source === "physical"
     );
-    $("chart-note").textContent = unsynced.length
-      ? `Dashed lines are simulated · ${unsynced.join(", ")} clock not synced, plotted at receive time`
-      : "Dashed lines are simulated nodes";
+    const notes = [
+      focus
+        ? `Showing the ${focus.size} location${focus.size === 1 ? "" : "s"} in the current event`
+        : "Solid: Ludington station · dashed: simulated nodes",
+    ];
+    if (unsynced.length) notes.push(`${unsynced.join(", ")} clock not synced, plotted at receive time`);
+    if (state.sourceNote) notes.push(state.sourceNote);
+    for (const [nodeId, entry] of series) {
+      const recent = entry.points.slice(-30);
+      const missed = recent.filter((point) => point.y === null).length;
+      if (missed) notes.push(`${nodeId}: ${missed} of last ${recent.length} readings had no echo (gaps)`);
+    }
+    $("chart-note").textContent = notes.join(" · ");
   }
 
   function metric(label, value, fraction) {
@@ -631,6 +779,78 @@
       fraction == null
         ? null
         : h("div", { class: "meter" }, h("span", { style: `width:${Math.round(Math.max(0, Math.min(1, fraction)) * 100)}%` }))
+    );
+  }
+
+  // Consecutive detections of the same situation (same kind, nodes and severity)
+  // collapse into one row, so a sensor re-reporting every few seconds stays readable.
+  function groupedHistory() {
+    const groups = [];
+    for (const event of state.history) {
+      const last = groups.at(-1);
+      if (last && eventSignature(last.event) === eventSignature(event)) {
+        last.count += 1;
+        last.firstAt = event.detected_at;
+      } else {
+        groups.push({ event, count: 1, firstAt: event.detected_at });
+      }
+    }
+    return groups.slice(0, HISTORY_ROWS);
+  }
+
+  function renderHistory() {
+    const body = $("history-body");
+    const groups = groupedHistory();
+    if (!groups.length) {
+      body.replaceChildren(h("p", { class: "empty-state", text: "No events detected yet. Run a scenario to create one." }));
+      return;
+    }
+
+    const selectedId = state.event && state.event.event_id;
+    const rows = groups.map(({ event, count, firstAt }) => {
+      const select = () => selectHistoryEvent(event);
+      const time = count > 1 ? `${formatTime(firstAt)}–${formatTime(event.detected_at)}` : formatTime(event.detected_at);
+      return h(
+        "tr",
+        {
+          class: event.event_id === selectedId ? "selected" : null,
+          tabindex: "0",
+          onclick: select,
+          onkeydown: (keyEvent) => {
+            if (keyEvent.key === "Enter" || keyEvent.key === " ") {
+              keyEvent.preventDefault();
+              select();
+            }
+          },
+        },
+        h("td", {}, time),
+        h(
+          "td",
+          {},
+          CLASSIFICATION_LABELS[event.classification] || event.classification,
+          count > 1 ? h("span", { class: "repeat", text: `×${count}` }) : null
+        ),
+        h("td", {}, severityBadge(event.severity)),
+        h("td", { title: event.affected_nodes.join(", ") }, String(event.affected_nodes.length)),
+        h("td", {}, `${event.amplitude_cm.toFixed(1)} cm`)
+      );
+    });
+
+    body.replaceChildren(
+      h(
+        "div",
+        { class: "history-scroll" },
+        h(
+          "table",
+          { class: "history-table" },
+          h(
+            "thead",
+            {},
+            h("tr", {}, h("th", { text: "Time" }), h("th", { text: "Event" }), h("th", { text: "Severity" }), h("th", { text: "Nodes" }), h("th", { text: "Amplitude" }))
+          ),
+          h("tbody", {}, rows)
+        )
+      )
     );
   }
 
@@ -672,7 +892,7 @@
         { class: "affected" },
         event.affected_nodes.map((nodeId) => {
           const node = state.nodes.get(nodeId);
-          return h("li", {}, nodeId, sourceTag(node ? node.source : null));
+          return h("li", {}, nodeId, sourceTag(node ? node.source : null, nodeId));
         })
       ),
       h("p", { class: "event-meta", text: `${event.event_id} · detected ${formatTime(event.detected_at)}` })
@@ -703,39 +923,65 @@
       setTimeout(() => (copyButton.textContent = "Copy draft"), 1500);
     });
 
+    const warningIcon = () => {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 0 24 24");
+      svg.setAttribute("class", "warning-icon");
+      svg.setAttribute("aria-hidden", "true");
+      svg.innerHTML = '<path d="M12 3 2 20h20L12 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17" r="1.2" fill="currentColor"/>';
+      return svg;
+    };
+
     return [
       h(
         "p",
         { class: "source-label" },
         sourceTagView,
         result.model_id ? h("span", { class: "chip", text: result.model_id }) : null,
-        h("span", { text: `for ${result.event_id} · ${formatTime(result.generated_at)}` }),
+        result.simulated ? h("span", { class: "chip", text: "Simulated data" }) : null,
+        h("span", { text: `${result.event_id} · ${formatTime(result.generated_at)}` }),
         note ? h("span", { text: note }) : null
       ),
       h(
         "div",
         { class: "explanation" },
-        h("section", {}, h("h3", { text: "Operator summary" }), h("p", { class: "summary-copy", text: explanation.summary })),
+        h(
+          "section",
+          { class: "explain-lead" },
+          h("h3", { text: "Operator summary" }),
+          h("p", { text: explanation.summary })
+        ),
         h(
           "div",
-          { class: "columns" },
-          h("section", {}, h("h3", { text: "Evidence" }), h("ul", {}, explanation.evidence.map((item) => h("li", { text: item })))),
+          { class: "explain-cards" },
           h(
             "section",
-            {},
-            h("h3", { text: "Recommended actions" }),
-            h("ol", {}, explanation.recommended_actions.map((item) => h("li", { text: item })))
+            { class: "explain-card" },
+            h("h3", { text: `Evidence (${explanation.evidence.length})` }),
+            h("ul", { class: "evidence-list" }, explanation.evidence.map((item) => h("li", { text: item })))
+          ),
+          h(
+            "section",
+            { class: "explain-card" },
+            h("h3", { text: `Recommended actions (${explanation.recommended_actions.length})` }),
+            h("ol", { class: "action-list" }, explanation.recommended_actions.map((item) => h("li", { text: item })))
           )
         ),
         h(
           "section",
           { class: "public-warning" },
-          h("h3", { text: "Public warning draft" }),
+          h(
+            "div",
+            { class: "public-warning-head" },
+            warningIcon(),
+            h("h3", { text: "Public warning draft" }),
+            h("span", { class: "badge watch", text: "Needs approval" })
+          ),
           h("blockquote", { text: explanation.public_warning }),
           h(
             "div",
             { class: "public-warning-foot" },
-            h("span", { class: "muted small", text: "Draft only — requires operator approval before release." }),
+            h("span", { class: "muted small", text: "Review before release. Granite drafts; an operator decides." }),
             copyButton
           )
         )
@@ -841,6 +1087,7 @@
     renderChart();
     renderEvent();
     renderExplanation();
+    renderHistory();
   }
 
   // ---------- Startup ----------
@@ -852,6 +1099,10 @@
       await api.health();
       setBackend("online");
       await Promise.all([refreshAll(), refreshIbmStatus()]);
+      // Opened mid-demo: explain the active warning right away (cached per event on the backend).
+      if (state.event && isEventActive() && state.event.severity === "warning" && $("auto-explain").checked) {
+        explain();
+      }
     } catch (error) {
       handleBackendError(error);
     }
@@ -876,9 +1127,14 @@
     mapView = window.WaveGuardMap.createMap($("map"), NODE_META);
     chartView = window.WaveGuardCharts.createChart($("level-chart"), NODE_META);
     $("api-url").textContent = API_BASE_URL;
+    $("demo-panel").hidden = !DEMO_CONTROLS;
 
     document.querySelectorAll("[data-scenario]").forEach((button) => {
       button.addEventListener("click", () => runScenario(button.dataset.scenario));
+    });
+    $("scenario-location").addEventListener("change", () => {
+      renderNodes();
+      syncBoardLocation();
     });
     $("explain-button").addEventListener("click", () => {
       const current = state.explanation;

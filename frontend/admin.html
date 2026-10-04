@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WaveGuard Demo Control</title>
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css?v=17" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="assets/favicon.svg" alt="" width="28" height="28" />
+        <div>
+          <h1>WaveGuard demo control</h1>
+          <p>Operator page · runs scenarios and picks which location the alert board shows</p>
+        </div>
+      </div>
+      <ul class="status-list" aria-label="System status">
+        <li class="status" id="status-backend"><span class="dot"></span><span class="label">Backend</span><span class="value">Checking…</span></li>
+        <li><a class="button small ghost" href="index.html" target="wg-dashboard">Open dashboard</a></li>
+      </ul>
+    </header>
+
+    <main class="grid admin-grid">
+      <section class="panel admin-location" aria-labelledby="location-title">
+        <h2 id="location-title" class="eyebrow">Location</h2>
+        <label class="location-picker admin-picker">
+          <span>Scenarios center here, and the alert board shows this location</span>
+          <select id="scenario-location">
+            <option value="MANISTEE-06">Manistee</option>
+            <option value="LUDINGTON-01">Ludington (physical sensor)</option>
+            <option value="MUSKEGON-02">Muskegon</option>
+            <option value="GRANDHAVEN-04">Grand Haven</option>
+            <option value="HOLLAND-03">Holland</option>
+            <option value="SOUTHHAVEN-05">South Haven</option>
+            <option value="">Whole shoreline</option>
+          </select>
+        </label>
+        <p class="admin-board" id="board-status" role="status">Reading the board's location…</p>
+      </section>
+
+      <section class="panel admin-scenarios" aria-labelledby="scenarios-title">
+        <div class="panel-head">
+          <h2 id="scenarios-title" class="eyebrow">Run a scenario</h2>
+          <span class="muted small">Keys 1–5 · each plays until you pick another</span>
+        </div>
+        <div class="scenario-buttons">
+          <button type="button" class="button scenario" data-scenario="normal" data-key="1">
+            <span class="scenario-name">1 · Normal</span><span class="scenario-hint">Calm everywhere · green</span>
+          </button>
+          <button type="button" class="button scenario" data-scenario="local_disturbance" data-key="2">
+            <span class="scenario-name">2 · Local disturbance</span><span class="scenario-hint">This location only · yellow</span>
+          </button>
+          <button type="button" class="button scenario" data-scenario="seiche" data-key="3">
+            <span class="scenario-name">3 · Seiche</span><span class="scenario-hint">This location + 2 nearest · solid red</span>
+          </button>
+          <button type="button" class="button scenario" data-scenario="sudden_surge" data-key="4">
+            <span class="scenario-name">4 · Sudden surge</span><span class="scenario-hint">This location + 2 nearest · flashing red</span>
+          </button>
+          <button type="button" class="button scenario manual" data-scenario="manual" data-key="5">
+            <span class="scenario-name">5 · Manual</span><span class="scenario-hint">Ludington = live tray sensor</span>
+          </button>
+        </div>
+        <p class="muted small" id="scenario-status" role="status"></p>
+      </section>
+
+      <section class="panel admin-sensor" aria-labelledby="sensor-title">
+        <div class="panel-head">
+          <h2 id="sensor-title" class="eyebrow">Live sensor · Ludington</h2>
+          <span class="chip" id="mode-chip">—</span>
+        </div>
+        <p class="admin-board" id="sensor-reading" role="status">Reading the sensor…</p>
+        <div class="admin-calibrate">
+          <button type="button" class="button" id="calibrate-button" disabled>Calibrate zero</button>
+          <span class="muted small" id="calibrate-status">In Manual mode with still water, makes the surface the sensor sees read 0 cm.</span>
+        </div>
+      </section>
+
+      <section class="panel admin-log" aria-labelledby="log-title">
+        <h2 id="log-title" class="eyebrow">Run log</h2>
+        <ol class="admin-log-list" id="run-log">
+          <li class="muted">No scenarios run yet.</li>
+        </ol>
+      </section>
+    </main>
+
+    <script src="admin.js?v=17"></script>
+  </body>
+</html>

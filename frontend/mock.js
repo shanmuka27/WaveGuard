@@ -7,51 +7,23 @@
     ["LUDINGTON-01", "simulated"],
     ["MUSKEGON-02", "simulated"],
     ["HOLLAND-03", "simulated"],
+    ["GRANDHAVEN-04", "simulated"],
+    ["SOUTHHAVEN-05", "simulated"],
+    ["MANISTEE-06", "simulated"],
+  ];
+  // Seiche amplitude scale and surge rise per node, as in backend/routes/scenarios.py.
+  // Tabletop scale: cm relative to calm water in the demo tray.
+  const NODE_RESPONSE = [
+    [1.0, 1.3],
+    [0.85, 1.25],
+    [1.15, 1.45],
+    [0.9, 1.3],
+    [1.1, 1.4],
+    [0.8, 1.25],
   ];
   // The firmware's unsynced default clock (2026-10-03T16:00:00Z plus uptime).
   const ARDUINO_BASE_EPOCH_MS = 1791043200 * 1000;
   const ALL_NODE_IDS = NODES.map(([nodeId]) => nodeId);
-
-  // Expected detector output for each scenario, matching backend/routes/scenarios.py.
-  const SCENARIO_RESULTS = {
-    normal: { nodeSeverity: () => "safe", event: null },
-    local_disturbance: {
-      nodeSeverity: (nodeId) => (nodeId === "LUDINGTON-01" ? "watch" : "safe"),
-      event: {
-        classification: "local_disturbance",
-        severity: "watch",
-        confidence: 0.99,
-        affected_nodes: ["LUDINGTON-01"],
-        amplitude_cm: 6.928,
-        period_seconds: 6.0,
-        correlation_score: 0.0,
-      },
-    },
-    seiche: {
-      nodeSeverity: () => "watch",
-      event: {
-        classification: "seiche_like",
-        severity: "warning",
-        confidence: 0.99,
-        affected_nodes: ALL_NODE_IDS,
-        amplitude_cm: 6.062,
-        period_seconds: 6.0,
-        correlation_score: 1.0,
-      },
-    },
-    sudden_surge: {
-      nodeSeverity: () => "warning",
-      event: {
-        classification: "sudden_surge",
-        severity: "warning",
-        confidence: 0.83,
-        affected_nodes: ALL_NODE_IDS,
-        amplitude_cm: 8.4,
-        period_seconds: null,
-        correlation_score: 1.0,
-      },
-    },
-  };
 
   const PRERECORDED = {
     summary:
@@ -74,16 +46,56 @@
       "Water levels along the Ludington, Muskegon, and Holland shoreline are rising and falling quickly. Stay off piers and breakwalls and keep away from the water's edge until officials say conditions are safe.",
   };
 
-  function level(scenario, nodeIndex, step) {
-    const baseline = 14.0 + nodeIndex * 0.3;
-    const noise = (Math.random() - 0.5) * 0.08;
-    if (scenario === "normal") return baseline + 0.15 * Math.sin((step * Math.PI) / 4) + noise;
-    if (scenario === "local_disturbance") {
-      return baseline + (nodeIndex === 0 ? 4.0 * Math.sin((step * Math.PI) / 3) : 0.1) + noise;
-    }
-    if (scenario === "seiche") return baseline + 3.5 * Math.sin((step * Math.PI) / 3) + noise;
-    return baseline + Math.max(0, step - 5) * 1.4 + noise;
+  // Localized runs reach the chosen node and its two nearest neighbours, as
+  // backend/routes/scenarios.py computes from the shoreline coordinates.
+  const NEAREST = {
+    "LUDINGTON-01": ["MANISTEE-06", "MUSKEGON-02"],
+    "MUSKEGON-02": ["GRANDHAVEN-04", "HOLLAND-03"],
+    "HOLLAND-03": ["GRANDHAVEN-04", "SOUTHHAVEN-05"],
+    "GRANDHAVEN-04": ["MUSKEGON-02", "HOLLAND-03"],
+    "SOUTHHAVEN-05": ["HOLLAND-03", "GRANDHAVEN-04"],
+    "MANISTEE-06": ["LUDINGTON-01", "MUSKEGON-02"],
+  };
+  const RANKED_RESPONSE = [
+    [1.0, 1.45],
+    [0.9, 1.35],
+    [0.8, 1.25],
+  ];
+
+  // node id -> [seiche scale, surge rate] for every node the scenario moves.
+  function scenarioResponses(scenario, location) {
+    if (scenario === "normal") return new Map();
+    if (scenario === "local_disturbance") return new Map([[location || NODES[0][0], RANKED_RESPONSE[0]]]);
+    if (!location) return new Map(NODES.map(([nodeId], index) => [nodeId, NODE_RESPONSE[index]]));
+    return new Map([location, ...NEAREST[location]].map((nodeId, rank) => [nodeId, RANKED_RESPONSE[rank]]));
   }
+
+  function level(scenario, response, step) {
+    const noise = (Math.random() - 0.5) * 0.08;
+    if (!response) return 0.15 * Math.sin((step * Math.PI) / 4) + noise;
+    const [seicheScale, surgeRate] = response;
+    if (scenario === "local_disturbance") return 2.0 * Math.sin((step * Math.PI) / 3) + noise;
+    if (scenario === "seiche") return 1.6 * seicheScale * Math.sin((step * Math.PI) / 3) + noise;
+    return Math.max(0, step - 5) * surgeRate + noise;
+  }
+
+  // Detector outcome per scenario; affected nodes come from scenarioResponses().
+  const SCENARIO_RESULTS = {
+    normal: { nodeSeverity: "safe", event: null },
+    manual: { nodeSeverity: "safe", event: null },
+    local_disturbance: {
+      nodeSeverity: "watch",
+      event: { classification: "local_disturbance", severity: "watch", confidence: 0.99, period_seconds: 6.0, correlation_score: 0.0 },
+    },
+    seiche: {
+      nodeSeverity: "watch",
+      event: { classification: "seiche_like", severity: "warning", confidence: 0.99, period_seconds: 6.0, correlation_score: 1.0 },
+    },
+    sudden_surge: {
+      nodeSeverity: "warning",
+      event: { classification: "sudden_surge", severity: "warning", confidence: 0.84, period_seconds: null, correlation_score: 1.0 },
+    },
+  };
 
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -124,7 +136,7 @@
   class MockApi {
     constructor({ physical = false } = {}) {
       this.readings = [];
-      this.events = [];
+      this.eventLog = [];
       this.nodeSeverity = {};
       this.onMessage = () => {};
       this.physical = physical;
@@ -178,49 +190,68 @@
       return this.readings.slice(-limit).reverse();
     }
 
-    async latestEvent() {
-      return this.events.at(-1) || null;
+    async events(limit) {
+      return this.eventLog.slice(-limit).reverse();
     }
 
-    async runScenario(scenario) {
+    async latestEvent() {
+      return this.eventLog.at(-1) || null;
+    }
+
+    async currentScenario() {
+      return null;
+    }
+
+    async setBoardLocation(location) {
+      return { location };
+    }
+
+    async runScenario(scenario, location = null) {
       const spec = SCENARIO_RESULTS[scenario];
       if (!spec) throw new Error(`Unknown scenario ${scenario}`);
-      // Mirror the backend's brief demo hold so a fake physical sample cannot
-      // immediately replace the simulated warning.
-      this.physicalHoldUntil =
-        spec.event?.severity === "warning" ? Date.now() + 30000 : 0;
+      // Mirror the backend's demo hold so a fake physical sample cannot
+      // immediately replace the simulated alert.
+      this.physicalHoldUntil = spec.event ? Date.now() + 30000 : 0;
       await delay(250);
 
+      const responses = scenarioResponses(scenario, location);
       const start = Date.now() - 11000;
       let generated = 0;
-      for (let step = 0; step < 12; step += 1) {
-        NODES.forEach(([nodeId, source], nodeIndex) => {
+      let amplitude = 0;
+      for (const [nodeId, source] of NODES) {
+        const levels = [];
+        for (let step = 0; step < 12; step += 1) {
+          const value = Number(level(scenario, responses.get(nodeId), step).toFixed(3));
+          levels.push(value);
           this.readings.push({
             node_id: nodeId,
             timestamp: new Date(start + step * 1000).toISOString(),
-            water_level_cm: Number(level(scenario, nodeIndex, step).toFixed(3)),
+            water_level_cm: value,
             quality: 0.98,
             source,
           });
           generated += 1;
-        });
+        }
+        if (responses.has(nodeId)) amplitude = Math.max(amplitude, Math.max(...levels) - Math.min(...levels));
+        this.nodeSeverity[nodeId] = responses.has(nodeId) ? spec.nodeSeverity : "safe";
       }
-      this.readings = this.readings.slice(-600);
-      for (const nodeId of ALL_NODE_IDS) this.nodeSeverity[nodeId] = spec.nodeSeverity(nodeId);
+      this.readings = this.readings.slice(-1200);
 
       const event = spec.event && {
         event_id: `evt-mock${Math.random().toString(16).slice(2, 8)}`,
         ...spec.event,
+        affected_nodes: [...responses.keys()],
+        amplitude_cm: Number(amplitude.toFixed(3)),
         detected_at: new Date().toISOString(),
       };
-      if (event) this.events.push(event);
+      if (event) this.eventLog.push(event);
 
-      this.onMessage({ type: "scenario_complete", scenario, event });
-      return { scenario, readings_generated: generated, event };
+      this.onMessage({ type: "scenario_complete", scenario, location, event });
+      return { scenario, location, readings_generated: generated, event };
     }
 
     async explain(eventId) {
-      const event = this.events.find((item) => item.event_id === eventId);
+      const event = this.eventLog.find((item) => item.event_id === eventId);
       if (!event) throw Object.assign(new Error("Event not found"), { status: 404 });
       await delay(1200);
       return {

@@ -187,12 +187,13 @@ code {
   margin-bottom: 0.8rem;
 }
 
+/* Top: severity + IBM. Middle: map + chart, evidence + history. Bottom: demo controls. */
 .summary {
-  grid-column: span 7;
+  grid-column: span 5;
 }
 
-.scenarios {
-  grid-column: span 5;
+.ibm-panel {
+  grid-column: span 7;
 }
 
 .map-panel {
@@ -207,17 +208,21 @@ code {
   grid-column: span 5;
 }
 
-.ibm-panel {
+.history-panel {
   grid-column: span 7;
+}
+
+.scenarios {
+  grid-column: 1 / -1;
 }
 
 @media (max-width: 1100px) {
   .summary,
-  .scenarios,
+  .ibm-panel,
   .map-panel,
   .chart-panel,
   .event-panel,
-  .ibm-panel {
+  .history-panel {
     grid-column: 1 / -1;
   }
 }
@@ -226,7 +231,7 @@ code {
 
 .summary {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 1.25rem;
   justify-content: space-between;
   border-left: 6px solid var(--sev, var(--unknown));
@@ -262,10 +267,17 @@ code {
 
 .summary-stats {
   display: grid;
-  grid-template-columns: repeat(2, minmax(7rem, 1fr));
-  gap: 0.6rem 1.5rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.6rem 1rem;
   margin: 0;
-  align-content: center;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 640px) {
+  .summary-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .summary-stats dt {
@@ -330,9 +342,18 @@ code {
 
 .scenario-buttons {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.6rem;
-  margin: 0.8rem 0 0.6rem;
+}
+
+@media (max-width: 900px) {
+  .scenario-buttons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.scenarios .panel-head {
+  margin-bottom: 0.6rem;
 }
 
 .scenario {
@@ -527,9 +548,16 @@ code {
 
 /* Chart */
 
+.chart-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Fill the chart panel so it matches the map column's height. */
 .chart-wrap {
   position: relative;
-  height: 360px;
+  flex: 1;
+  min-height: 360px;
 }
 
 .chart-empty {
@@ -690,18 +718,86 @@ code {
   color: var(--muted);
 }
 
-.explanation .summary-copy {
-  font-size: 1.02rem;
+.explain-lead {
+  padding: 0.85rem 1rem;
+  border-left: 4px solid #0f62fe;
+  border-radius: 4px 8px 8px 4px;
+  background: color-mix(in srgb, #0f62fe 10%, var(--panel));
 }
 
-.explanation ul,
-.explanation ol {
-  margin: 0;
-  padding-left: 1.2rem;
+.explain-lead p {
+  font-size: 1.08rem;
+  line-height: 1.5;
 }
 
-.explanation li + li {
-  margin-top: 0.25rem;
+.explain-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .explain-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+.explain-card {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-raised);
+}
+
+.evidence-list,
+.action-list {
+  margin: 0.2rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.92rem;
+}
+
+.evidence-list li,
+.action-list li {
+  position: relative;
+  padding-left: 1.6rem;
+}
+
+.evidence-list li + li,
+.action-list li + li {
+  margin-top: 0.55rem;
+}
+
+.evidence-list li::before {
+  content: "";
+  position: absolute;
+  left: 0.3rem;
+  top: 0.55em;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.action-list {
+  counter-reset: action;
+}
+
+.action-list li::before {
+  counter-increment: action;
+  content: counter(action);
+  position: absolute;
+  left: 0;
+  top: 0.05em;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  background: #0f62fe;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.15rem;
+  text-align: center;
 }
 
 .columns {
@@ -721,13 +817,37 @@ code {
 .public-warning {
   padding: 0.85rem 1rem;
   border: 1px solid color-mix(in srgb, var(--watch) 45%, transparent);
-  border-radius: 8px;
+  border-left: 4px solid var(--watch);
+  border-radius: 4px 8px 8px 4px;
   background: color-mix(in srgb, var(--watch) 8%, var(--panel));
 }
 
+.public-warning-head {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.public-warning-head h3 {
+  margin: 0;
+  color: var(--watch);
+}
+
+.public-warning-head .badge {
+  margin-left: auto;
+}
+
+.warning-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--watch);
+  flex: none;
+}
+
 .public-warning blockquote {
-  margin: 0.4rem 0 0.6rem;
-  font-size: 1rem;
+  margin: 0.6rem 0 0.75rem;
+  font-size: 1.05rem;
+  line-height: 1.5;
 }
 
 .public-warning-foot {
@@ -804,4 +924,454 @@ code {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* Event history */
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.history-table th {
+  padding: 0 0.6rem 0.4rem;
+  text-align: left;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.history-table td {
+  padding: 0.45rem 0.6rem;
+  border-top: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.history-table tbody tr {
+  cursor: pointer;
+}
+
+.history-table tbody tr:hover,
+.history-table tbody tr:focus-visible {
+  background: var(--panel-raised);
+  outline: none;
+}
+
+.history-table tbody tr.selected {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+
+.history-table .repeat {
+  margin-left: 0.35rem;
+  color: var(--muted);
+}
+
+.history-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* Scenario location */
+
+.location-picker {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.location-picker select {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.35rem 0.6rem;
+}
+
+.location-picker select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.scenario-status {
+  margin-left: auto;
+}
+
+.node-row.selectable {
+  cursor: pointer;
+}
+
+.node-row.selectable:hover {
+  border-color: var(--accent);
+}
+
+.panel[hidden] {
+  display: none;
+}
+
+.node-row.chosen {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+}
+
+/* Admin (demo control) page */
+
+.admin-grid {
+  max-width: 72rem;
+}
+
+.admin-location,
+.admin-scenarios,
+.admin-log {
+  grid-column: 1 / -1;
+}
+
+.admin-picker {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.admin-picker select {
+  max-width: 24rem;
+  font-size: 1rem;
+  padding: 0.55rem 0.7rem;
+}
+
+.admin-board {
+  margin-top: 0.9rem;
+  padding: 0.6rem 0.85rem;
+  border-left: 4px solid var(--unknown);
+  border-radius: 4px;
+  background: var(--panel-raised);
+  font-weight: 600;
+}
+
+.admin-board[data-severity="safe"] {
+  border-color: var(--safe);
+}
+
+.admin-board[data-severity="watch"] {
+  border-color: var(--watch);
+}
+
+.admin-board[data-severity="warning"] {
+  border-color: var(--warning);
+}
+
+.admin-scenarios .scenario {
+  padding: 1rem;
+}
+
+.admin-scenarios .scenario-name {
+  font-size: 1.05rem;
+}
+
+.admin-log-list {
+  margin: 0.6rem 0 0;
+  padding-left: 1.2rem;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+}
+
+.admin-log-list li + li {
+  margin-top: 0.3rem;
+}
+
+.status-list a.button {
+  text-decoration: none;
+}
+
+.admin-log-list li.muted {
+  margin-left: -1.2rem;
+  list-style: none;
+}
+
+/* Severity box: status centered, affected towns, stats along the bottom */
+
+.summary-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.summary-places {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.summary-places:empty {
+  display: none;
+}
+
+.place {
+  display: grid;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--unknown);
+  border-radius: 4px 8px 8px 4px;
+  background: var(--panel-raised);
+}
+
+.place.watch {
+  border-left-color: var(--watch);
+}
+
+.place.warning {
+  border-left-color: var(--warning);
+}
+
+.place-name {
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.place-id {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* The severity box now shares the Granite panel's height: give the status more presence. */
+.summary .severity-word {
+  font-size: clamp(2.5rem, 5vw, 4.25rem);
+}
+
+.summary .summary-text {
+  font-size: 1.1rem;
+}
+
+/* ---------- One-screen "control room" layout ----------
+   A status strip across the top; map, chart and Granite side by side below it.
+   Every panel is clipped to its grid cell and scrolls inside itself, so a long
+   Granite explanation can never push the chart or map off screen. */
+
+@media (min-width: 1100px) and (min-height: 600px) {
+  .dashboard {
+    max-width: none;
+    height: calc(100vh - 81px);
+    padding-top: 0.6rem;
+    padding-bottom: 0.6rem;
+    gap: 0.6rem;
+    grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.6fr) minmax(330px, 1.2fr);
+    grid-template-rows: auto minmax(0, 1.35fr) minmax(0, 1fr);
+    grid-template-areas:
+      "status  status   status"
+      "map     chart    ibm"
+      "history evidence ibm";
+  }
+
+  .dashboard > .panel {
+    grid-column: auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 0.75rem 1rem;
+  }
+
+  .dashboard .panel-head {
+    margin-bottom: 0.5rem;
+  }
+
+  .dashboard .summary { grid-area: status; }
+  .dashboard .map-panel { grid-area: map; }
+  .dashboard .chart-panel { grid-area: chart; }
+  .dashboard .ibm-panel { grid-area: ibm; }
+  .dashboard .history-panel { grid-area: history; }
+  .dashboard .event-panel { grid-area: evidence; }
+  .dashboard .scenarios { display: none; }
+
+  /* Status strip: severity | what is happening + towns | node counts */
+  .dashboard .summary {
+    flex-direction: row;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 0.6rem 1.1rem;
+  }
+
+  .dashboard .summary-main {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    grid-template-areas:
+      "label text"
+      "word  places";
+    column-gap: 1.5rem;
+    align-items: center;
+  }
+
+  .dashboard .summary-main .eyebrow { grid-area: label; }
+
+  .dashboard .summary .severity-word {
+    grid-area: word;
+    margin: 0;
+    font-size: clamp(1.8rem, 2.6vw, 2.6rem);
+  }
+
+  .dashboard .summary .summary-text {
+    grid-area: text;
+    max-width: none;
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dashboard .summary-places {
+    grid-area: places;
+    margin: 0.3rem 0 0;
+    gap: 0.4rem;
+  }
+
+  .dashboard .summary-places:empty {
+    display: block;
+  }
+
+  .dashboard .place {
+    display: flex;
+    gap: 0.5rem;
+    align-items: baseline;
+    padding: 0.25rem 0.6rem;
+  }
+
+  .dashboard .place-name {
+    font-size: 0.95rem;
+  }
+
+  .dashboard .summary-stats {
+    flex: none;
+    grid-template-columns: repeat(4, max-content);
+    gap: 0.2rem 1.4rem;
+    padding: 0 0 0 1.4rem;
+    border-top: 0;
+    border-left: 1px solid var(--border);
+  }
+
+  .dashboard .summary-stats dd {
+    font-size: 1rem;
+  }
+
+  /* Map fills its cell; node states are on the map and in the status strip. */
+  .dashboard .map {
+    flex: 1;
+    height: auto;
+    min-height: 120px;
+  }
+
+  .dashboard .node-list {
+    display: none;
+  }
+
+  .dashboard .chart-wrap {
+    min-height: 0;
+  }
+
+  /* Long content scrolls inside its own panel */
+  .dashboard #ibm-body,
+  .dashboard #history-body,
+  .dashboard #event-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 0.25rem;
+  }
+
+  .dashboard .history-scroll {
+    max-height: none;
+  }
+
+  .dashboard .ibm-controls {
+    margin-bottom: 0.6rem;
+  }
+
+  .dashboard .explain-cards {
+    grid-template-columns: 1fr;
+  }
+
+  /* Evidence: compact, four metrics in a row */
+  .dashboard .event-header {
+    margin-bottom: 0.5rem;
+  }
+
+  .dashboard .metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .dashboard .metric {
+    padding: 0.4rem 0.6rem;
+  }
+
+  .dashboard .metric dd {
+    font-size: 1rem;
+  }
+
+  .dashboard .meter {
+    display: none;
+  }
+
+  .footer {
+    display: none;
+  }
+}
+
+/* Shorter windows: history steps aside so the map gets the whole left column. */
+@media (min-width: 1100px) and (min-height: 600px) and (max-height: 820px) {
+  .dashboard {
+    grid-template-rows: auto minmax(0, 1fr) minmax(0, 0.7fr);
+    grid-template-areas:
+      "status status   status"
+      "map    chart    ibm"
+      "map    evidence ibm";
+  }
+
+  .dashboard .history-panel {
+    display: none;
+  }
+
+  .dashboard .affected,
+  .dashboard .event-meta,
+  .dashboard .event-panel .eyebrow {
+    display: none;
+  }
+}
+
+/* Admin: five modes and the live sensor panel */
+.admin-scenarios .scenario-buttons {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+  .admin-scenarios .scenario-buttons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.scenario.manual {
+  border-style: dashed;
+}
+
+.admin-sensor {
+  grid-column: 1 / -1;
+}
+
+.admin-calibrate {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  align-items: center;
+  margin-top: 0.8rem;
 }

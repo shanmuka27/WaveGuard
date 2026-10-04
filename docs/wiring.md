@@ -33,7 +33,7 @@ This document provides the exact pin connections, resistor values, and breadboar
 | **Green LED Cathode (-)** | `GND` | Direct to GND rail | Flat edge / short leg |
 | **Yellow LED Anode (+)** | `Digital 5` | Via 220Ω resistor | Turns ON for `STATE,WATCH` |
 | **Yellow LED Cathode (-)** | `GND` | Direct to GND rail | Flat edge / short leg |
-| **Red LED Anode (+)** | `Digital 6` | Via 220Ω resistor | Turns ON for `STATE,WARNING` |
+| **Red LED Anode (+)** | `Digital 6` | Via 220Ω resistor | Solid for `STATE,WARNING`, flashing for `STATE,SURGE` |
 | **Red LED Cathode (-)** | `GND` | Direct to GND rail | Flat edge / short leg |
 | **Piezo Buzzer (+)** | `Digital 7` | Direct pin connection | Positive leg (or red wire) |
 | **Piezo Buzzer (-)** | `GND` | Direct to GND rail | Negative leg |
@@ -103,4 +103,5 @@ This document provides the exact pin connections, resistor values, and breadboar
 6. Type the following test commands into the Serial Monitor input bar and press Enter:
    * `STATE,WATCH` $\rightarrow$ Green turns off, Yellow turns ON.
    * `STATE,WARNING` $\rightarrow$ Yellow turns off, Red turns ON, and Buzzer pulses!
+   * `STATE,SURGE` $\rightarrow$ Red FLASHES in time with the pulsing buzzer (sudden-surge warning).
    * `STATE,SAFE` $\rightarrow$ Red turns off, Buzzer stops, Green turns ON.

@@ -26,7 +26,13 @@
     }).addTo(map);
 
     const coordinates = Object.values(nodeMeta).map((meta) => [meta.lat, meta.lng]);
-    map.fitBounds(coordinates, { padding: [60, 60] });
+    // Keep every node in view whenever the map's box changes size (layout
+    // switches, window resizes, the grid settling after load).
+    const refit = () => {
+      map.invalidateSize();
+      map.fitBounds(coordinates, { padding: [36, 36] });
+    };
+    refit();
 
     const markers = new Map();
     const halos = new Map();
@@ -37,7 +43,9 @@
         if (!meta) continue;
 
         const color = SEVERITY_COLORS[node.severity] || SEVERITY_COLORS.unknown;
-        const simulated = node.source !== "physical";
+        // The physical station keeps its solid marker while playing scenario data.
+        const playingScenario = Boolean(meta.physicalStation) && node.source === "simulated";
+        const simulated = node.source !== "physical" && !playingScenario;
         const style = {
           radius: 10,
           color: "#eef8fb",
@@ -46,16 +54,17 @@
           fillColor: color,
           fillOpacity: simulated ? 0.75 : 1,
         };
-        const sourceLabel = node.source ? node.source.toUpperCase() : "NO DATA";
-        const label = `${node.node_id} · ${sourceLabel}`;
+        const sourceLabel = playingScenario ? "SCENARIO" : node.source ? node.source.toUpperCase() : "NO DATA";
+        // Nearby towns alternate sides (meta.labelSide) so their labels do not stack.
+        const label = `${meta.location} · ${sourceLabel}`;
 
         let marker = markers.get(node.node_id);
         if (!marker) {
           marker = L.circleMarker([meta.lat, meta.lng], style)
             .bindTooltip(label, {
               permanent: true,
-              direction: "right",
-              offset: [12, 0],
+              direction: meta.labelSide || "right",
+              offset: [meta.labelSide === "left" ? -12 : 12, 0],
               className: "node-label",
             })
             .addTo(map);
@@ -85,9 +94,9 @@
       }
     }
 
-    // Leaflet needs a size recalculation once the grid layout settles.
-    setTimeout(() => map.invalidateSize(), 0);
-    window.addEventListener("resize", () => map.invalidateSize());
+    setTimeout(refit, 0);
+    if (window.ResizeObserver) new ResizeObserver(refit).observe(element);
+    else window.addEventListener("resize", refit);
 
     return { update };
   }

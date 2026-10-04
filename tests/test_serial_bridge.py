@@ -133,10 +133,10 @@ def test_correlated_warning_and_reset_reach_arduino(tmp_path):
                 )
         service.detect_event()
         assert service.overall_severity() == Severity.WARNING
-        await bridge.send_state(service.overall_severity())
+        await bridge.sync_state()
 
         service.reset_live_state()
-        await bridge.send_state(service.overall_severity())
+        await bridge.sync_state()
         assert serial.writes == [b"STATE,WARNING\n", b"STATE,SAFE\n"]
 
     asyncio.run(check())
@@ -194,17 +194,87 @@ def test_warning_demo_holds_physical_ingestion_then_resumes(tmp_path):
         connections = FakeConnections()
         bridge = SerialBridge(
             "fake", 115200, 20.0, service, connections,
-            clock=lambda: 1791043200, scenario_hold_seconds=30,
+            clock=lambda: 1791043200,
         )
         bridge._connection = FakeSerial()
-        bridge.hold_warning_scenario(Severity.WARNING)
+        bridge.pause_physical(True)
         await bridge.process_line(b"READING,1791043200,6.0,0.95\n")
         assert database.latest_readings() == []
         assert connections.messages == []
 
-        bridge._scenario_hold_until = 0
+        bridge.pause_physical(False)
         await bridge.process_line(b"READING,1791043201,6.0,0.95\n")
         assert len(database.latest_readings()) == 1
         assert connections.messages[0]["reading"]["source"] == "physical"
+
+    asyncio.run(check())
+
+
+def test_physical_readings_pause_only_outside_manual_mode(tmp_path):
+    database = Database(str(tmp_path / "pause.db"))
+    database.initialize()
+    bridge = SerialBridge("fake", 115200, 20.0, EventService(database), FakeConnections())
+
+    assert not bridge.holding()  # starts in manual: the live sensor feeds the detector
+    bridge.pause_physical(True)
+    assert bridge.holding()
+    bridge.pause_physical(False)
+    assert not bridge.holding()
+
+
+def test_surge_warning_sends_surge_then_seiche_sends_warning(tmp_path):
+    from backend.schemas import Event
+
+    async def check():
+        database = Database(str(tmp_path / "surge.db"))
+        database.initialize()
+        service = EventService(database)
+        bridge = SerialBridge("fake", 115200, 20.0, service, FakeConnections())
+        serial = FakeSerial()
+        bridge._connection = serial
+
+        def event(classification):
+            return Event(
+                event_id=f"evt-{classification}", classification=classification,
+                severity="warning", confidence=0.9,
+                affected_nodes=["LUDINGTON-01", "MUSKEGON-02", "HOLLAND-03"],
+                amplitude_cm=8.0, correlation_score=0.9,
+            )
+
+        service.current_event = event("sudden_surge")
+        await bridge.sync_state()
+        await bridge.sync_state()  # unchanged: not resent
+        service.current_event = event("seiche_like")
+        await bridge.sync_state()
+
+        assert serial.writes == [b"STATE,SURGE\n", b"STATE,WARNING\n"]
+
+    asyncio.run(check())
+
+
+def test_board_shows_its_own_location_not_the_whole_network(tmp_path):
+    from backend.schemas import Event
+
+    async def check():
+        database = Database(str(tmp_path / "board.db"))
+        database.initialize()
+        service = EventService(database)
+        bridge = SerialBridge("fake", 115200, 20.0, service, FakeConnections())
+        serial = FakeSerial()
+        bridge._connection = serial
+        service.current_event = Event(
+            event_id="evt-holland-surge", classification="sudden_surge", severity="warning",
+            confidence=0.9, affected_nodes=["HOLLAND-03", "GRANDHAVEN-04", "SOUTHHAVEN-05"],
+            amplitude_cm=8.0, correlation_score=1.0,
+        )
+
+        await bridge.sync_state()                     # Ludington's board: not in the event
+        await bridge.set_board_node("HOLLAND-03")     # switch the board to Holland
+        await bridge.set_board_node("LUDINGTON-01")   # and back
+        await bridge.set_board_node(None)             # whole network
+
+        assert serial.writes == [
+            b"STATE,SAFE\n", b"STATE,SURGE\n", b"STATE,SAFE\n", b"STATE,SURGE\n"
+        ]
 
     asyncio.run(check())

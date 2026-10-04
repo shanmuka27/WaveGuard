@@ -31,6 +31,9 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:5500"],
+    # Phone mode (start-demo.bat phone): pages served to devices on the same
+    # private network, e.g. http://192.168.1.20:5500.
+    allow_origin_regex=r"http://(10\.\d+|192\.168|172\.(1[6-9]|2\d|3[01]))\.\d+\.\d+:(3000|5500)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,6 +43,8 @@ app.include_router(readings.router)
 app.include_router(nodes.router)
 app.include_router(events.router)
 app.include_router(scenarios.router)
+app.include_router(scenarios.board_router)
+app.include_router(scenarios.sensor_router)
 app.include_router(agent_tools.router)
 
 

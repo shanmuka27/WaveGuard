@@ -69,7 +69,11 @@ The backend sends one of:
 STATE,SAFE
 STATE,WATCH
 STATE,WARNING
+STATE,SURGE
+TIME,<unix_epoch_seconds>
 ```
+
+`STATE,SURGE` is a `warning` whose event classification is `sudden_surge`. `TIME` syncs the Arduino clock when the backend connects.
 
 An ultrasonic sensor measures the distance from the mounted sensor to the water surface. Rising water decreases that distance. The backend converts it using a configured reference distance:
 
@@ -77,4 +81,4 @@ An ultrasonic sensor measures the distance from the mounted sensor to the water 
 water_level_cm = reference_distance_cm - distance_cm
 ```
 
-The Arduino controls indicators from backend state: green for `SAFE`, yellow for `WATCH`, and red plus buzzer for `WARNING`.
+The Arduino controls indicators from backend state: green for `SAFE`, yellow for `WATCH`, solid red plus buzzer for `WARNING`, and flashing red plus buzzer for `SURGE`.

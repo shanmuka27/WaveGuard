@@ -65,9 +65,14 @@
       let index = 0;
       for (const [nodeId, entry] of series) {
         const color = nodeMeta[nodeId]?.color || FALLBACK_COLORS[index % FALLBACK_COLORS.length];
-        const simulated = entry.source !== "physical";
+        // The physical station keeps a solid line even while it plays scenario
+        // data; the legend still says which data it is showing.
+        const station = Boolean(nodeMeta[nodeId]?.physicalStation);
+        const live = entry.source === "physical";
+        const simulated = !live && !station;
+        const kind = live ? "live sensor" : station ? "scenario data" : entry.source || "unknown";
         datasets.push({
-          label: `${nodeId} (${entry.source || "unknown"})`,
+          label: `${nodeId} (${kind})`,
           data: entry.points,
           borderColor: color,
           backgroundColor: color,

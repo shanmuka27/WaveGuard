@@ -60,5 +60,7 @@ class IngestResult(BaseModel):
 
 class ScenarioResult(BaseModel):
     scenario: str
+    location: Optional[str] = None
+    source_note: Optional[str] = None
     readings_generated: int
     event: Optional[Event] = None

@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 
-from backend.schemas import Reading, ReadingSource, Severity
+from typing import Optional
+
+from backend.schemas import EventClassification, Reading, ReadingSource, Severity
 
 
 def parse_reading_line(
@@ -23,5 +25,10 @@ def parse_reading_line(
     )
 
 
-def state_command(severity: Severity) -> str:
+def state_command(
+    severity: Severity, classification: Optional[EventClassification] = None
+) -> str:
+    """Alert command for the Arduino. A sudden-surge warning flashes red (SURGE)."""
+    if severity == Severity.WARNING and classification == EventClassification.SUDDEN_SURGE:
+        return "STATE,SURGE\n"
     return f"STATE,{severity.value.upper()}\n"

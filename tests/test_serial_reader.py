@@ -1,4 +1,4 @@
-from backend.schemas import Severity
+from backend.schemas import EventClassification, Severity
 from backend.serial_reader import parse_reading_line, state_command
 
 
@@ -10,3 +10,15 @@ def test_parse_serial_reading_converts_distance_to_level() -> None:
 
 def test_warning_command_matches_hardware_contract() -> None:
     assert state_command(Severity.WARNING) == "STATE,WARNING\n"
+
+
+def test_sudden_surge_warning_flashes_red() -> None:
+    assert (
+        state_command(Severity.WARNING, EventClassification.SUDDEN_SURGE)
+        == "STATE,SURGE\n"
+    )
+    assert (
+        state_command(Severity.WARNING, EventClassification.SEICHE_LIKE)
+        == "STATE,WARNING\n"
+    )
+    assert state_command(Severity.WATCH, EventClassification.SUDDEN_SURGE) == "STATE,WATCH\n"

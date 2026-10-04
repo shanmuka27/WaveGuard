@@ -6,7 +6,7 @@
     <title>WaveGuard Operations</title>
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="assets/vendor/leaflet/leaflet.css" />
-    <link rel="stylesheet" href="styles.css?v=5" />
+    <link rel="stylesheet" href="styles.css?v=17" />
   </head>
   <body>
     <header class="topbar">
@@ -22,6 +22,7 @@
         <li class="status" id="status-stream"><span class="dot"></span><span class="label">Live stream</span><span class="value">—</span></li>
         <li class="status" id="status-ibm"><span class="dot"></span><span class="label">IBM Granite</span><span class="value">—</span></li>
         <li class="status" id="status-mode"><span class="dot"></span><span class="label">Data</span><span class="value">—</span></li>
+        <li><a class="button small ghost" href="admin.html" target="wg-admin">Demo control</a></li>
       </ul>
     </header>
 
@@ -31,12 +32,13 @@
       <button type="button" class="button small ghost" id="use-mock">Use mock data</button>
     </div>
 
-    <main class="grid">
+    <main class="grid dashboard">
       <section class="panel summary" id="summary" aria-labelledby="summary-title" data-severity="unknown">
         <div class="summary-main">
           <h2 id="summary-title" class="eyebrow">Network severity</h2>
           <p class="severity-word" id="overall-severity">—</p>
           <p class="summary-text" id="summary-text">Waiting for readings…</p>
+          <ul class="summary-places" id="summary-places" aria-label="Affected locations"></ul>
         </div>
         <dl class="summary-stats">
           <div><dt>Nodes reporting</dt><dd id="stat-nodes">0</dd></div>
@@ -46,23 +48,19 @@
         </dl>
       </section>
 
-      <section class="panel scenarios" aria-labelledby="scenarios-title">
-        <h2 id="scenarios-title" class="eyebrow">Demo scenarios</h2>
-        <div class="scenario-buttons">
-          <button type="button" class="button scenario" data-scenario="normal">
-            <span class="scenario-name">Normal</span><span class="scenario-hint">Expect safe</span>
-          </button>
-          <button type="button" class="button scenario" data-scenario="local_disturbance">
-            <span class="scenario-name">Local disturbance</span><span class="scenario-hint">Expect watch</span>
-          </button>
-          <button type="button" class="button scenario" data-scenario="seiche">
-            <span class="scenario-name">Seiche</span><span class="scenario-hint">Expect warning</span>
-          </button>
-          <button type="button" class="button scenario" data-scenario="sudden_surge">
-            <span class="scenario-name">Sudden surge</span><span class="scenario-hint">Expect warning</span>
-          </button>
+      <section class="panel ibm-panel" aria-labelledby="ibm-title">
+        <div class="panel-head">
+          <h2 id="ibm-title" class="eyebrow">IBM Granite explanation</h2>
+          <span class="chip" id="ibm-model" hidden></span>
         </div>
-        <p class="muted small" id="scenario-status" role="status"></p>
+        <div class="ibm-controls">
+          <button type="button" class="button primary" id="explain-button" disabled>Explain with Granite</button>
+          <label class="toggle">
+            <input type="checkbox" id="auto-explain" checked />
+            <span>Auto-explain warnings</span>
+          </label>
+        </div>
+        <div id="ibm-body" aria-live="polite"></div>
       </section>
 
       <section class="panel map-panel" aria-labelledby="map-title">
@@ -90,25 +88,51 @@
 
       <section class="panel event-panel" id="event-panel" aria-labelledby="event-title" aria-live="polite">
         <div class="panel-head">
-          <h2 id="event-title" class="eyebrow">Latest event evidence</h2>
+          <h2 id="event-title" class="eyebrow">Event evidence</h2>
           <span class="muted small">Severity set by the deterministic detector</span>
         </div>
         <div id="event-body"></div>
       </section>
 
-      <section class="panel ibm-panel" aria-labelledby="ibm-title">
+      <section class="panel history-panel" aria-labelledby="history-title">
         <div class="panel-head">
-          <h2 id="ibm-title" class="eyebrow">IBM Granite explanation</h2>
-          <span class="chip" id="ibm-model" hidden></span>
+          <h2 id="history-title" class="eyebrow">Event history</h2>
+          <span class="muted small">Select an event to review it or ask Granite</span>
         </div>
-        <div class="ibm-controls">
-          <button type="button" class="button primary" id="explain-button" disabled>Explain with Granite</button>
-          <label class="toggle">
-            <input type="checkbox" id="auto-explain" checked />
-            <span>Auto-explain warnings</span>
+        <div id="history-body"></div>
+      </section>
+
+      <section class="panel scenarios" id="demo-panel" aria-labelledby="scenarios-title" hidden>
+        <div class="panel-head">
+          <h2 id="scenarios-title" class="eyebrow">Demo scenarios</h2>
+          <label class="location-picker">
+            <span title="Scenarios center here, and the physical alert board shows this location's status">Location</span>
+            <select id="scenario-location">
+              <option value="MANISTEE-06">Manistee</option>
+              <option value="LUDINGTON-01" selected>Ludington (physical sensor)</option>
+              <option value="MUSKEGON-02">Muskegon</option>
+              <option value="GRANDHAVEN-04">Grand Haven</option>
+              <option value="HOLLAND-03">Holland</option>
+              <option value="SOUTHHAVEN-05">South Haven</option>
+              <option value="">Whole shoreline</option>
+            </select>
           </label>
+          <p class="muted small scenario-status" id="scenario-status" role="status"></p>
         </div>
-        <div id="ibm-body" aria-live="polite"></div>
+        <div class="scenario-buttons">
+          <button type="button" class="button scenario" data-scenario="normal">
+            <span class="scenario-name">Normal</span><span class="scenario-hint">Expect safe</span>
+          </button>
+          <button type="button" class="button scenario" data-scenario="local_disturbance">
+            <span class="scenario-name">Local disturbance</span><span class="scenario-hint">Expect watch</span>
+          </button>
+          <button type="button" class="button scenario" data-scenario="seiche">
+            <span class="scenario-name">Seiche</span><span class="scenario-hint">Expect warning</span>
+          </button>
+          <button type="button" class="button scenario" data-scenario="sudden_surge">
+            <span class="scenario-name">Sudden surge</span><span class="scenario-hint">Expect warning</span>
+          </button>
+        </div>
       </section>
     </main>
 
@@ -118,9 +142,9 @@
 
     <script src="assets/vendor/chart.umd.min.js"></script>
     <script src="assets/vendor/leaflet/leaflet.js"></script>
-    <script src="map.js?v=5"></script>
-    <script src="charts.js"></script>
-    <script src="mock.js?v=5"></script>
-    <script src="app.js?v=5"></script>
+    <script src="map.js?v=17"></script>
+    <script src="charts.js?v=17"></script>
+    <script src="mock.js?v=17"></script>
+    <script src="app.js?v=17"></script>
   </body>
 </html>

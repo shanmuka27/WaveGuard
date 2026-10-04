@@ -98,9 +98,15 @@ def test_explain_keeps_detector_severity_and_caches_result():
     assert result.severity == "warning"
     assert result.classification == "seiche_like"
     assert result.explanation.recommended_actions == ["Clear the piers"]
-    assert "simulated or unverified" in result.explanation.summary
+    # Granite's wording is kept, labeled as simulated because no node is physical.
+    assert result.simulated is True
+    assert result.explanation.summary == (
+        "Simulated demonstration: " + GRANITE_JSON["summary"]
+    )
+    assert result.explanation.public_warning == (
+        "Simulation draft, not a real hazard: " + GRANITE_JSON["public_warning"]
+    )
     assert "Maximum peak-to-trough amplitude" in result.explanation.evidence[1]
-    assert "no real shoreline hazard is confirmed" in result.explanation.public_warning
     assert again is result
     chat_calls = [call for call in session.calls if "/ml/v1/text/chat" in call[0]]
     assert len(chat_calls) == 1
@@ -108,6 +114,26 @@ def test_explain_keeps_detector_severity_and_caches_result():
     assert body["model_id"] == "ibm/granite-test"
     assert body["project_id"] == "project"
     assert "evt-test" in body["messages"][1]["content"]
+
+
+def test_physical_event_keeps_granite_text_unlabeled():
+    sources = {node_id: "physical" for node_id in EVENT.affected_nodes}
+    client = WatsonxClient(SETTINGS, session=FakeSession(chat_reply(json.dumps(GRANITE_JSON))))
+
+    result = client.explain(EVENT, sources)
+
+    assert result.simulated is False
+    assert result.explanation.summary == GRANITE_JSON["summary"]
+    assert result.explanation.public_warning == GRANITE_JSON["public_warning"]
+
+
+def test_simulated_label_is_not_duplicated():
+    already_labeled = {**GRANITE_JSON, "summary": "Simulated demonstration only: nodes oscillate."}
+    client = WatsonxClient(SETTINGS, session=FakeSession(chat_reply(json.dumps(already_labeled))))
+
+    result = client.explain(EVENT)
+
+    assert result.explanation.summary == already_labeled["summary"]
 
 
 def test_explain_without_credentials_raises_not_configured():

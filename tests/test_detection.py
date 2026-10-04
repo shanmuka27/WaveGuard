@@ -24,6 +24,13 @@ def test_normal_signal_stays_normal() -> None:
     assert assessment.classification == EventClassification.NORMAL
 
 
+def test_sensor_jitter_within_noise_band_stays_normal() -> None:
+    # Recorded from the physical HC-SR04 over a still surface: ~1 cm hops at 1 Hz.
+    values = [1.1, 1.1, 1.5, 1.5, 1.1, 1.1, 1.7, 1.7, 0.7, 1.5, 0.7, 1.5]
+    assessment = classify_node(make_readings(values))
+    assert assessment.classification == EventClassification.NORMAL
+
+
 def test_rising_signal_is_sudden_surge() -> None:
     assessment = classify_node(make_readings([14.0, 14.2, 14.4, 15.8, 17.2, 18.6]))
     assert assessment.classification == EventClassification.SUDDEN_SURGE

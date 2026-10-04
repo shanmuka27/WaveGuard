@@ -7,7 +7,7 @@ from typing import Optional, Tuple
 from backend.database import Database
 from backend.detection.event_classifier import classify_node
 from backend.detection.node_correlator import correlate
-from backend.schemas import Event, NodeStatus, Reading, Severity
+from backend.schemas import Event, EventClassification, NodeStatus, Reading, Severity
 
 
 class EventService:
@@ -84,6 +84,23 @@ class EventService:
             severities.append(self.current_event.severity)
         rank = {Severity.SAFE: 0, Severity.WATCH: 1, Severity.WARNING: 2}
         return max(severities, key=rank.__getitem__, default=Severity.SAFE)
+
+    def alert_for(
+        self, node_id: Optional[str]
+    ) -> Tuple[Severity, Optional[EventClassification]]:
+        """Severity and event kind a location's alert board shows; None = whole network.
+
+        A location's own reading severity is raised to the current event's severity
+        when the event includes it, so a surge at Holland leaves Ludington's board safe.
+        """
+        event = self.current_event
+        if node_id is None:
+            return self.overall_severity(), event.classification if event else None
+        severity = self.severity_by_node.get(node_id, Severity.SAFE)
+        if event is None or node_id not in event.affected_nodes:
+            return severity, None
+        rank = {Severity.SAFE: 0, Severity.WATCH: 1, Severity.WARNING: 2}
+        return max(severity, event.severity, key=rank.__getitem__), event.classification
 
     def nodes(self) -> list[NodeStatus]:
         return [

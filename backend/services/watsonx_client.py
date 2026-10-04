@@ -34,6 +34,9 @@ NODE_LOCATIONS = {
     "LUDINGTON-01": "Ludington",
     "MUSKEGON-02": "Muskegon",
     "HOLLAND-03": "Holland",
+    "GRANDHAVEN-04": "Grand Haven",
+    "SOUTHHAVEN-05": "South Haven",
+    "MANISTEE-06": "Manistee",
 }
 
 
@@ -59,6 +62,7 @@ class ExplanationResult(BaseModel):
     source: str  # "granite" or "prerecorded"
     model_id: Optional[str] = None
     generated_at: datetime
+    simulated: bool = False  # True when any affected node is simulated or unverified
     explanation: Explanation
 
 
@@ -137,24 +141,29 @@ def ground_explanation(
         f"Maximum peak-to-trough amplitude among affected nodes: {event.amplitude_cm:g} cm; aggregate estimated period: {period}.",
         f"Affected nodes: {', '.join(event.affected_nodes)}; correlation score: {event.correlation_score:.2f}.",
     ]
-    if all(node_sources.get(node_id) == "physical" for node_id in event.affected_nodes):
+    if not involves_simulated_data(event, node_sources):
         return generated.model_copy(update={"evidence": evidence})
 
-    locations = ", ".join(NODE_LOCATIONS.get(node_id, node_id) for node_id in event.affected_nodes)
-    summary = (
-        f"Demonstration event: the detector classified {event.classification.value.replace('_', ' ')} "
-        f"at {len(event.affected_nodes)} nodes and assigned {event.severity.value} severity. "
-        "At least one affected node uses simulated or unverified data."
-    )
-    warning = (
-        f"Simulation draft only: no real shoreline hazard is confirmed. If equivalent changes are "
-        f"verified by physical sensors near {locations}, advise people to avoid piers and shoreline edges."
-        if event.severity.value == "warning"
-        else "Simulation only: verify conditions with physical sensors before considering a public advisory."
-    )
+    # Keep Granite's own wording, but guarantee it never reads as a confirmed real hazard.
     return generated.model_copy(
-        update={"summary": summary, "evidence": evidence, "public_warning": warning}
+        update={
+            "summary": _label_simulated(generated.summary, "Simulated demonstration: "),
+            "evidence": evidence,
+            "public_warning": _label_simulated(
+                generated.public_warning, "Simulation draft, not a real hazard: "
+            ),
+        }
     )
+
+
+def involves_simulated_data(event: Event, node_sources: dict[str, str]) -> bool:
+    return any(node_sources.get(node_id) != "physical" for node_id in event.affected_nodes)
+
+
+def _label_simulated(text: str, prefix: str) -> str:
+    if re.search(r"simulat|demonstration", text, flags=re.IGNORECASE):
+        return text
+    return prefix + text
 
 
 def load_prerecorded() -> ExplanationResult:
@@ -236,6 +245,7 @@ class WatsonxClient:
             source="granite",
             model_id=self.settings.model_id,
             generated_at=datetime.now(timezone.utc),
+            simulated=involves_simulated_data(event, node_sources or {}),
             explanation=explanation,
         )
         self._cache[event.event_id] = result

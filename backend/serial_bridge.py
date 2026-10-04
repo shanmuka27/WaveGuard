@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from backend.serial_reader import parse_reading_line, state_command
 from backend.services.event_service import EventService
-from backend.schemas import Severity
+from backend.schemas import EventClassification, Severity
 
 if TYPE_CHECKING:
     from backend.realtime import ConnectionManager
@@ -36,7 +36,6 @@ class SerialBridge:
         node_id: str = "LUDINGTON-01",
         serial_factory: Callable[[str, int], Any] = open_serial,
         clock: Callable[[], float] = time.time,
-        scenario_hold_seconds: float = 30.0,
     ) -> None:
         self.port = port
         self.baud_rate = baud_rate
@@ -46,20 +45,23 @@ class SerialBridge:
         self.node_id = node_id
         self.serial_factory = serial_factory
         self.clock = clock
-        self.scenario_hold_seconds = scenario_hold_seconds
         self._connection: Optional[Any] = None
-        self._last_sent: Optional[Severity] = None
+        self._last_sent: Optional[str] = None  # last STATE command written
+        # Location whose status the LEDs show; None = whole network. Each shoreline
+        # site has its own board, so by default it shows its own node.
+        self.board_node: Optional[str] = node_id
         self._time_sent = False
-        self._scenario_hold_until = 0.0
+        # True while a demo scenario plays the physical station's data; the live
+        # sensor only feeds the detector in manual mode.
+        self._physical_paused = False
         self._write_lock = asyncio.Lock()
 
-    def hold_warning_scenario(self, severity: Severity) -> None:
-        """Keep a simulated warning visible while the demo is being explained."""
-        self._scenario_hold_until = (
-            time.monotonic() + self.scenario_hold_seconds
-            if severity == Severity.WARNING
-            else 0.0
-        )
+    def holding(self) -> bool:
+        """True while a demo scenario, not the live sensor, drives the physical station."""
+        return self._physical_paused
+
+    def pause_physical(self, paused: bool) -> None:
+        self._physical_paused = paused
 
     async def run(self) -> None:
         """Reconnect after an unplug or read failure until the app shuts down."""
@@ -73,7 +75,7 @@ class SerialBridge:
                 self._last_sent = None
                 self._time_sent = False
                 logger.info("Arduino connected on %s", self.port)
-                await self.send_state(self.event_service.overall_severity())
+                await self.sync_state()
 
                 while True:
                     raw = await asyncio.to_thread(connection.readline)
@@ -99,7 +101,7 @@ class SerialBridge:
                         logger.warning("Could not close Arduino port: %s", error)
 
     async def process_line(self, raw: bytes) -> None:
-        if time.monotonic() < self._scenario_hold_until:
+        if self._physical_paused:
             return
         reading = parse_reading_line(
             raw.decode("ascii"), self.node_id, self.reference_distance_cm
@@ -116,7 +118,16 @@ class SerialBridge:
                 "event": event.model_dump(mode="json") if event else None,
             }
         )
-        await self.send_state(self.event_service.overall_severity())
+        await self.sync_state()
+
+    async def sync_state(self) -> None:
+        """Show the board location's current alert on the LEDs."""
+        severity, classification = self.event_service.alert_for(self.board_node)
+        await self.send_state(severity, classification)
+
+    async def set_board_node(self, node_id: Optional[str]) -> None:
+        self.board_node = node_id
+        await self.sync_state()
 
     async def send_time(self) -> None:
         async with self._write_lock:
@@ -134,16 +145,17 @@ class SerialBridge:
                 except Exception as close_error:
                     logger.warning("Could not close Arduino port: %s", close_error)
 
-    async def send_state(self, severity: Severity) -> None:
+    async def send_state(
+        self, severity: Severity, classification: Optional[EventClassification] = None
+    ) -> None:
         async with self._write_lock:
             connection = self._connection
-            if connection is None or severity == self._last_sent:
+            command = state_command(severity, classification)
+            if connection is None or command == self._last_sent:
                 return
             try:
-                await asyncio.to_thread(
-                    connection.write, state_command(severity).encode("ascii")
-                )
-                self._last_sent = severity
+                await asyncio.to_thread(connection.write, command.encode("ascii"))
+                self._last_sent = command
             except (OSError, ValueError) as error:
                 logger.warning("Could not send Arduino state: %s", error)
                 self._last_sent = None

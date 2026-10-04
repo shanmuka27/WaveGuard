@@ -15,7 +15,6 @@ class Settings:
     serial_port: str = os.getenv("SERIAL_PORT", "")
     serial_baud_rate: int = int(os.getenv("SERIAL_BAUD_RATE", "115200"))
     reference_distance_cm: float = float(os.getenv("REFERENCE_DISTANCE_CM", "20.0"))
-    scenario_hold_seconds: float = float(os.getenv("SCENARIO_HOLD_SECONDS", "30"))
 
 
 settings = Settings()

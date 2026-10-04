@@ -16,7 +16,7 @@ async def submit_reading(reading: Reading) -> IngestResult:
             "event": event.model_dump(mode="json") if event else None,
         }
     )
-    await serial_bridge.send_state(event_service.overall_severity())
+    await serial_bridge.sync_state()
     return IngestResult(reading=reading, event=event)
 
 
