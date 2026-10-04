@@ -70,7 +70,7 @@
         const station = Boolean(nodeMeta[nodeId]?.physicalStation);
         const live = entry.source === "physical";
         const simulated = !live && !station;
-        const kind = live ? "live sensor" : station ? "scenario data" : entry.source || "unknown";
+        const kind = live ? "live sensor" : station ? "simulated scenario" : entry.source || "unknown";
         datasets.push({
           label: `${nodeId} (${kind})`,
           data: entry.points,
@@ -88,7 +88,7 @@
       chart.update("none");
     }
 
-    return { setSeries };
+    return { setSeries, resize: () => chart.resize() };
   }
 
   window.WaveGuardCharts = { createChart };

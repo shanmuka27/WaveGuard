@@ -1375,3 +1375,31 @@ code {
   align-items: center;
   margin-top: 0.8rem;
 }
+/* Incident replay remains separate from the continuously updating live chart. */
+.dashboard > .replay-panel {
+  position: fixed;
+  z-index: 1000;
+  top: 5vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(1100px, 94vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  display: block;
+  padding: 1.2rem;
+  box-shadow: 0 0 0 100vmax rgb(0 0 0 / 72%);
+}
+.dashboard > .replay-panel[hidden] { display: none !important; }
+.replay-open { margin-top: 1rem; }
+.replay-chart-wrap { height: 260px; margin-top: 1rem; }
+.replay-topline, .replay-controls { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
+.replay-topline { justify-content: space-between; }
+.replay-picker { display: flex; align-items: center; gap: .5rem; margin: .7rem 0; font-size: .86rem; }
+.replay-picker select { flex: 1; min-width: 0; padding: .45rem; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: .4rem; }
+.replay-controls { margin: .8rem 0; }
+.replay-controls input[type="range"] { flex: 1; min-width: 160px; accent-color: #4fd1e8; }
+.replay-reason { padding: .8rem 1rem; border-left: 3px solid #4fd1e8; background: #102d3d; }
+.replay-nodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .6rem; margin-top: 1rem; }
+.replay-node { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; padding: .65rem; border: 1px solid #1c4257; border-radius: .5rem; }
+.replay-node.is-affected { border-color: #4fd1e8; }
+.replay-node strong { width: 100%; }

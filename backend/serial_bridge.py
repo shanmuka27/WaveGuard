@@ -54,7 +54,13 @@ class SerialBridge:
         # True while a demo scenario plays the physical station's data; the live
         # sensor only feeds the detector in manual mode.
         self._physical_paused = False
-        self._write_lock = asyncio.Lock()
+        # Python 3.9 requires a running loop when constructing asyncio.Lock.
+        self._write_lock: Optional[asyncio.Lock] = None
+
+    def _lock(self) -> asyncio.Lock:
+        if self._write_lock is None:
+            self._write_lock = asyncio.Lock()
+        return self._write_lock
 
     def holding(self) -> bool:
         """True while a demo scenario, not the live sensor, drives the physical station."""
@@ -130,7 +136,7 @@ class SerialBridge:
         await self.sync_state()
 
     async def send_time(self) -> None:
-        async with self._write_lock:
+        async with self._lock():
             connection = self._connection
             if connection is None or self._time_sent:
                 return
@@ -148,7 +154,7 @@ class SerialBridge:
     async def send_state(
         self, severity: Severity, classification: Optional[EventClassification] = None
     ) -> None:
-        async with self._write_lock:
+        async with self._lock():
             connection = self._connection
             command = state_command(severity, classification)
             if connection is None or command == self._last_sent:

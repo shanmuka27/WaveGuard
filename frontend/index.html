@@ -6,7 +6,7 @@
     <title>WaveGuard Operations</title>
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="assets/vendor/leaflet/leaflet.css" />
-    <link rel="stylesheet" href="styles.css?v=17" />
+    <link rel="stylesheet" href="styles.css?v=19" />
   </head>
   <body>
     <header class="topbar">
@@ -22,6 +22,7 @@
         <li class="status" id="status-stream"><span class="dot"></span><span class="label">Live stream</span><span class="value">—</span></li>
         <li class="status" id="status-ibm"><span class="dot"></span><span class="label">IBM Granite</span><span class="value">—</span></li>
         <li class="status" id="status-mode"><span class="dot"></span><span class="label">Data</span><span class="value">—</span></li>
+        <li><button type="button" class="button small ghost" id="open-replay-history" disabled>Incident Replay</button></li>
         <li><a class="button small ghost" href="admin.html" target="wg-admin">Demo control</a></li>
       </ul>
     </header>
@@ -94,6 +95,17 @@
         <div id="event-body"></div>
       </section>
 
+      <section class="panel replay-panel" id="replay-panel" role="dialog" aria-modal="true" aria-labelledby="replay-title" hidden>
+        <div class="panel-head">
+          <h2 id="replay-title" class="eyebrow">Incident Replay</h2>
+          <button type="button" class="button small ghost" id="close-replay">Close replay</button>
+        </div>
+        <div id="replay-body"><p class="empty-state">Select an event, then click Replay event.</p></div>
+        <div class="chart-wrap replay-chart-wrap" id="replay-chart-wrap" hidden>
+          <canvas id="replay-chart" aria-label="Saved incident readings by node"></canvas>
+        </div>
+      </section>
+
       <section class="panel history-panel" aria-labelledby="history-title">
         <div class="panel-head">
           <h2 id="history-title" class="eyebrow">Event history</h2>
@@ -143,8 +155,8 @@
     <script src="assets/vendor/chart.umd.min.js"></script>
     <script src="assets/vendor/leaflet/leaflet.js"></script>
     <script src="map.js?v=17"></script>
-    <script src="charts.js?v=17"></script>
+    <script src="charts.js?v=19"></script>
     <script src="mock.js?v=17"></script>
-    <script src="app.js?v=17"></script>
+    <script src="app.js?v=19"></script>
   </body>
 </html>

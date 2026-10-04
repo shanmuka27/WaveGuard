@@ -12,6 +12,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 @dataclass(frozen=True)
 class Settings:
     database_path: str = os.getenv("DATABASE_PATH", "waveguard.db")
+    tiger_database_url: str = os.getenv("TIGER_DATABASE_URL", "")
     serial_port: str = os.getenv("SERIAL_PORT", "")
     serial_baud_rate: int = int(os.getenv("SERIAL_BAUD_RATE", "115200"))
     reference_distance_cm: float = float(os.getenv("REFERENCE_DISTANCE_CM", "20.0"))

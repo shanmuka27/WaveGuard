@@ -39,6 +39,14 @@ After the first reading on each connection, the backend sends `TIME,<unix_epoch>
 
 Connect the dashboard to `ws://127.0.0.1:8000/ws/live`. Messages contain a `type` field and either a reading, an event, or a scenario completion summary.
 
+## Incident Replay with Tiger Data
+
+Create a Tiger Data service and put its PostgreSQL connection URI in local `.env` as `TIGER_DATABASE_URL`. Keep the URI out of Git. Install dependencies with `pip install -r requirements-dev.txt`, then restart the backend. On startup the backend creates a TimescaleDB `readings` hypertable and ordinary `events` and `event_readings` tables. Every physical and simulated reading goes to the hypertable with its timestamp and source. When Python detects an event, the event and a frozen copy of its detector input window are committed together. Startup fails if the configured service cannot provide the hypertable; the dashboard will never claim Tiger Data is active when it is not.
+
+With `TIGER_DATABASE_URL` empty, the same replay API runs on local SQLite for development and labels itself "Local SQLite preview". Existing SQLite incidents are not copied into Tiger Data when switching storage. To inspect a stored incident, run `GET /api/events/{event_id}/replay`, click **Incident Replay** in the dashboard header, or select an event and click **Replay event**. The dashboard animates saved traces, shows the first ≥1 cm change per node, and displays the detector's warning rule. Saved source labels distinguish live Arduino readings from simulated neighbors. The IBM explanation endpoint receives the saved node source and change summary for that event.
+
+For a mixed-source demo, start `manual` mode in the demo control page while the Arduino is connected. Move the water for at least twelve good readings, then click **Trigger simulated neighbors** (or `POST /api/sensor/neighbor-response`). This copies the observed Ludington waveform into two explicitly simulated neighbor responses and lets Python detect the shared pattern. It is a demonstration of correlation with simulated response nodes, not independent confirmation from physical sensors at those locations. Open the dashboard and click **Replay event** to review the saved evidence. With only the physical disturbance and calm neighbors, the detector normally reports WATCH; with three abnormal correlated nodes it can report WARNING.
+
 ## Tests
 
 ```bash

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import median
@@ -13,6 +14,8 @@ from fastapi import APIRouter, HTTPException, Query
 from backend.runtime import connections, database, event_service, serial_bridge
 from backend.schemas import Reading, ReadingSource, ScenarioResult
 from backend.services.replay import describe, gauge_series, replay_length
+from backend.detection.event_classifier import classify_node
+from backend.schemas import EventClassification
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +178,8 @@ def _reading(node_id: str, source: ReadingSource, level: float, at: datetime) ->
 
 _playback_task: Optional[asyncio.Task] = None
 _current: dict = {"scenario": None, "location": None, "source_note": None}
+_neighbor_response_until = 0.0
+NEIGHBOR_RESPONSE_HOLD_SECONDS = 30
 
 
 def _loop_index(scenario: str, step: int) -> int:
@@ -202,6 +207,9 @@ async def _stream_playback(scenario: str, levels: dict[str, list[float]]) -> Non
             for node_id, source in NODES:
                 # In manual mode the physical station is the live sensor.
                 if node_id == PHYSICAL_NODE and not serial_bridge.holding():
+                    continue
+                if (scenario == "manual" and node_id in nearest_nodes(PHYSICAL_NODE, 2)
+                        and time.monotonic() < _neighbor_response_until):
                     continue
                 reading = _reading(node_id, source, levels[node_id][index], now)
                 event = event_service.ingest(reading)
@@ -235,8 +243,10 @@ async def run_scenario(
             status_code=404, detail=f"Location must be one of: {', '.join(NODE_COORDS)}"
         )
     global _playback_task
+    global _neighbor_response_until
     if _playback_task is not None:
         _playback_task.cancel()
+    _neighbor_response_until = 0.0
     levels = playback(scenario, location)
     note = source_note(scenario, location)
     _current.update(scenario=scenario, location=location, source_note=note)
@@ -272,6 +282,60 @@ async def run_scenario(
         readings_generated=generated,
         source_note=note,
         event=latest_event,
+    )
+
+
+@sensor_router.post("/neighbor-response", response_model=ScenarioResult)
+async def trigger_neighbor_response() -> ScenarioResult:
+    """Replay the recent real Ludington shape on two labeled simulated neighbors."""
+    global _neighbor_response_until
+    if _current["scenario"] != "manual" or serial_bridge.holding():
+        raise HTTPException(status_code=409, detail="Start Manual mode with the Arduino first.")
+    physical = [
+        reading for reading in event_service.histories[PHYSICAL_NODE]
+        if reading.source == ReadingSource.PHYSICAL and reading.quality > 0.5
+    ][-SEED_STEPS:]
+    if len(physical) < SEED_STEPS or (
+        datetime.now(timezone.utc) - physical[-1].timestamp
+    ).total_seconds() > 5:
+        raise HTTPException(status_code=409, detail="Need 12 recent good Arduino readings first.")
+    if classify_node(physical).classification == EventClassification.NORMAL:
+        raise HTTPException(status_code=409, detail="Move the water until the live Ludington trace changes, then retry.")
+
+    neighbors = nearest_nodes(PHYSICAL_NODE, 2)
+    event_service.reset_node_signals(neighbors)
+    # This is a response simulation driven by the observed physical waveform,
+    # not independent evidence from real sensors at the other locations.
+    generated = 0
+    generated_readings = []
+    for reading in physical:
+        for index, node_id in enumerate(neighbors):
+            simulated = _reading(
+                node_id, ReadingSource.SIMULATED,
+                reading.water_level_cm * (0.95 if index == 0 else 1.05),
+                reading.timestamp,
+            )
+            event_service.ingest(simulated, detect=False)
+            generated += 1
+            generated_readings.append(simulated)
+    event = event_service.detect_event()
+    _neighbor_response_until = time.monotonic() + NEIGHBOR_RESPONSE_HOLD_SECONDS
+    note = ("Ludington is the live Arduino trace. The two neighboring traces are "
+            "simulated responses derived from its recent waveform, not independent physical sensors.")
+    _current["source_note"] = note
+    for simulated in generated_readings:
+        await connections.broadcast({
+            "type": "reading", "reading": simulated.model_dump(mode="json"), "event": None,
+        })
+    await serial_bridge.set_board_node(PHYSICAL_NODE)
+    await connections.broadcast({
+        "type": "scenario_complete", "scenario": "neighbor_response",
+        "location": PHYSICAL_NODE, "source_note": note,
+        "event": event.model_dump(mode="json") if event else None,
+    })
+    return ScenarioResult(
+        scenario="neighbor_response", location=PHYSICAL_NODE, source_note=note,
+        readings_generated=generated, event=event,
     )
 
 

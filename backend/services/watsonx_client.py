@@ -19,7 +19,8 @@ import requests
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from backend.schemas import Event
+from backend.schemas import Event, Reading
+from backend.services.incident_replay import summarize_nodes
 
 load_dotenv()
 
@@ -98,7 +99,8 @@ class WatsonxSettings:
         return bool(self.api_key and self.project_id and self.url and self.model_id)
 
 
-def build_granite_input(event: Event, node_sources: Optional[dict[str, str]] = None) -> dict:
+def build_granite_input(event: Event, node_sources: Optional[dict[str, str]] = None,
+                        readings: Optional[list[Reading]] = None) -> dict:
     """Return the only facts Granite is allowed to use."""
     node_sources = node_sources or {}
     nodes = [
@@ -109,7 +111,12 @@ def build_granite_input(event: Event, node_sources: Optional[dict[str, str]] = N
         }
         for node_id in event.affected_nodes
     ]
-    return {"event": event.model_dump(mode="json"), "nodes": nodes}
+    facts = {"event": event.model_dump(mode="json"), "nodes": nodes}
+    if readings:
+        facts["saved_reading_evidence"] = [
+            node.model_dump(mode="json") for node in summarize_nodes(event, readings)
+        ]
+    return facts
 
 
 def parse_explanation(text: str) -> Explanation:
@@ -128,7 +135,8 @@ def parse_explanation(text: str) -> Explanation:
 
 
 def ground_explanation(
-    generated: Explanation, event: Event, node_sources: dict[str, str]
+    generated: Explanation, event: Event, node_sources: dict[str, str],
+    readings: Optional[list[Reading]] = None,
 ) -> Explanation:
     """Keep displayed evidence tied to detector fields, even if Granite overstates it."""
     period = (
@@ -141,6 +149,13 @@ def ground_explanation(
         f"Maximum peak-to-trough amplitude among affected nodes: {event.amplitude_cm:g} cm; aggregate estimated period: {period}.",
         f"Affected nodes: {', '.join(event.affected_nodes)}; correlation score: {event.correlation_score:.2f}.",
     ]
+    if readings:
+        summaries = summarize_nodes(event, readings)
+        changes = [
+            f"{node.node_id} ({node.source.value}): {node.first_changed_at or 'no 1 cm change in saved window'}"
+            for node in summaries if node.affected
+        ]
+        evidence.append("Saved detector-window change times: " + "; ".join(changes) + ".")
     if not involves_simulated_data(event, node_sources):
         return generated.model_copy(update={"evidence": evidence})
 
@@ -212,6 +227,7 @@ class WatsonxClient:
         event: Event,
         node_sources: Optional[dict[str, str]] = None,
         refresh: bool = False,
+        readings: Optional[list[Reading]] = None,
     ) -> ExplanationResult:
         if not refresh and event.event_id in self._cache:
             return self._cache[event.event_id]
@@ -221,7 +237,7 @@ class WatsonxClient:
                 "Set WATSONX_API_KEY and WATSONX_PROJECT_ID in .env to enable Granite.",
             )
 
-        facts = build_granite_input(event, node_sources)
+        facts = build_granite_input(event, node_sources, readings)
         messages = [
             {"role": "system", "content": PROMPT_PATH.read_text(encoding="utf-8")},
             {
@@ -232,7 +248,7 @@ class WatsonxClient:
         ]
         try:
             explanation = ground_explanation(
-                parse_explanation(self._chat(messages)), event, node_sources or {}
+                parse_explanation(self._chat(messages)), event, node_sources or {}, readings
             )
         except WatsonxError as error:
             self.last_error = error.message

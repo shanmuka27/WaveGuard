@@ -20,6 +20,8 @@ async def lifespan(_: FastAPI):
         if serial_task is not None:
             serial_task.cancel()
             await asyncio.gather(serial_task, return_exceptions=True)
+        if hasattr(database, "close"):
+            database.close()
 
 app = FastAPI(
     title="WaveGuard API",

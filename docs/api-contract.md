@@ -51,7 +51,9 @@ Allowed severity values are `safe`, `watch`, and `warning`.
 | `GET` | `/api/readings/latest` | Retrieve recent readings |
 | `GET` | `/api/events` | List detected events |
 | `GET` | `/api/events/latest` | Retrieve the latest event |
+| `GET` | `/api/events/{event_id}/replay` | Saved detector input window, source labels, change times, and warning rule |
 | `POST` | `/api/scenarios/{scenario}` | Start a named demo scenario |
+| `POST` | `/api/sensor/neighbor-response` | Add labeled simulated neighboring responses derived from recent physical readings |
 | `POST` | `/api/events/{event_id}/explain` | Generate a Granite explanation |
 | `WS` | `/ws/live` | Stream readings, node state, and events |
 

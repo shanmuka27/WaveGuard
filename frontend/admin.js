@@ -140,6 +140,7 @@
     const chip = $("mode-chip");
     chip.textContent = sensor.manual ? "Manual · live" : "Scenario playing";
     $("calibrate-button").disabled = !sensor.manual;
+    $("neighbor-button").disabled = !sensor.manual;
     const latest = sensor.latest;
     const zero = `zero at ${sensor.reference_distance_cm} cm`;
     if (!sensor.manual) {
@@ -171,8 +172,28 @@
     await refreshSensor().catch(() => {});
   }
 
+  async function triggerNeighbors() {
+    const button = $("neighbor-button");
+    button.disabled = true;
+    $("scenario-status").textContent = "Saving simulated neighbor response…";
+    try {
+      const result = await request("/api/sensor/neighbor-response", "POST");
+      const outcome = result.event
+        ? `${result.event.severity.toUpperCase()} · ${result.event.affected_nodes.join(", ")}`
+        : "No shared pattern yet";
+      $("scenario-status").textContent = `Neighbor response: ${outcome}. Open the dashboard and click Replay event.`;
+      logRun(`Simulated neighbors derived from live Ludington → ${outcome}`);
+      await describeBoard();
+    } catch (error) {
+      $("scenario-status").textContent = `Neighbor response unavailable: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   async function init() {
     $("calibrate-button").addEventListener("click", calibrate);
+    $("neighbor-button").addEventListener("click", triggerNeighbors);
     document.querySelectorAll("[data-scenario]").forEach((button) => {
       button.addEventListener("click", () => runScenario(button.dataset.scenario));
     });

@@ -57,6 +57,11 @@
     lastScenario: null,
     lastUpdate: null,
     history: [], // newest first, from GET /api/events
+    replay: null,
+    replayIndex: 0,
+    replayPlaying: false,
+    replayLoading: false,
+    replayError: null,
     sourceNote: null, // what the running scenario replays (NOAA records, synthetic parts)
     clockOffsets: new Map(), // node_id -> ms added to unsynced physical timestamps
     explainToken: 0,
@@ -92,7 +97,7 @@
     if (source === "physical") return h("span", { class: "tag physical", text: "Physical" });
     // The physical station playing a demo scenario: generated data, solid styling.
     if (source === "simulated" && (NODE_META[nodeId] || {}).physicalStation) {
-      return h("span", { class: "tag physical", text: "Scenario" });
+      return h("span", { class: "tag simulated", text: "Simulated scenario" });
     }
     if (source === "simulated") return h("span", { class: "tag simulated", text: "Simulated" });
     return h("span", { class: "tag unknown-source", text: "No data" });
@@ -161,6 +166,10 @@
 
     events(limit) {
       return this.request(`/api/events?limit=${limit}`);
+    }
+
+    replay(eventId) {
+      return this.request(`/api/events/${encodeURIComponent(eventId)}/replay`);
     }
 
     currentScenario() {
@@ -356,6 +365,64 @@
   function selectHistoryEvent(event) {
     setEvent(event, { newRun: true });
     render();
+  }
+
+  let replayTimer = null;
+  function replayTimes() {
+    return state.replay ? [...new Set(state.replay.readings.map((reading) => reading.timestamp))].sort() : [];
+  }
+
+  function pauseReplay() {
+    clearInterval(replayTimer);
+    replayTimer = null;
+    state.replayPlaying = false;
+  }
+
+  function closeReplay() {
+    pauseReplay();
+    state.replay = null;
+    state.replayError = null;
+    state.replayLoading = false;
+    renderReplay();
+  }
+
+  function playReplay() {
+    if (!state.replay) return;
+    const times = replayTimes();
+    if (state.replayIndex >= times.length - 1) state.replayIndex = 0;
+    pauseReplay();
+    state.replayPlaying = true;
+    replayTimer = setInterval(() => {
+      state.replayIndex += 1;
+      if (state.replayIndex >= times.length - 1) pauseReplay();
+      renderReplay();
+    }, 650);
+    renderReplay();
+  }
+
+  async function loadReplay(event) {
+    if (state.mode === "mock") return;
+    pauseReplay();
+    state.replayLoading = true;
+    state.replayError = null;
+    renderReplay();
+    try {
+      const replay = await api.replay(event.event_id);
+      state.replay = replay;
+      state.replayIndex = 0;
+      playReplay();
+    } catch (error) {
+      state.replayError = error.message;
+      handleBackendError(error);
+    } finally {
+      state.replayLoading = false;
+      renderReplay();
+    }
+  }
+
+  function openSavedReplay() {
+    const event = state.history.find((item) => item.severity === "warning") || state.history[0];
+    if (event) loadReplay(event);
   }
 
   let nodesRefreshTimer = null;
@@ -624,6 +691,7 @@
   }
 
   function renderStatus() {
+    $("open-replay-history").disabled = state.mode === "mock" || !state.history.length;
     if (state.mode === "mock") setStatus("status-backend", ["info", "Mock"], "Running without the backend");
     else setStatus("status-backend", STATUS_VIEWS.backend[state.backend], API_BASE_URL);
     setStatus("status-stream", STATUS_VIEWS.stream[state.stream] || ["", "—"], WS_URL);
@@ -895,7 +963,84 @@
           return h("li", {}, nodeId, sourceTag(node ? node.source : null, nodeId));
         })
       ),
-      h("p", { class: "event-meta", text: `${event.event_id} · detected ${formatTime(event.detected_at)}` })
+      h("p", { class: "event-meta", text: `${event.event_id} · detected ${formatTime(event.detected_at)}` }),
+      h("button", {
+        type: "button", class: "button primary replay-open", text: "Replay event",
+        disabled: state.mode === "mock" || state.replayLoading,
+        onclick: () => loadReplay(event),
+      })
+    );
+  }
+
+  let replayChartView = null;
+  function renderReplay() {
+    const body = $("replay-body");
+    $("replay-panel").hidden = !(state.replayLoading || state.replayError || state.replay);
+    if (state.replayLoading) {
+      body.replaceChildren(h("p", { class: "muted", text: "Loading saved incident evidence…" }));
+      return;
+    }
+    if (state.replayError) {
+      body.replaceChildren(h("p", { class: "empty-state", text: `Replay unavailable: ${state.replayError}` }));
+      $("replay-chart-wrap").hidden = true;
+      return;
+    }
+    const replay = state.replay;
+    if (!replay) {
+      body.replaceChildren(h("p", { class: "empty-state", text: "Select an event, then click Replay event to review its saved readings." }));
+      $("replay-chart-wrap").hidden = true;
+      return;
+    }
+    const times = replayTimes();
+    const time = times[Math.min(state.replayIndex, times.length - 1)];
+    const visible = replay.readings.filter((reading) => reading.timestamp <= time);
+    const savedEvents = state.history.slice(0, 30);
+    if (!savedEvents.some((event) => event.event_id === replay.event.event_id)) savedEvents.unshift(replay.event);
+    const series = new Map();
+    for (const reading of visible) {
+      if (!series.has(reading.node_id)) series.set(reading.node_id, { source: reading.source, points: [] });
+      series.get(reading.node_id).points.push({
+        x: Date.parse(reading.timestamp),
+        y: isUsableReading(reading) ? reading.water_level_cm : null,
+      });
+    }
+    $("replay-chart-wrap").hidden = false;
+    replayChartView.resize();
+    replayChartView.setSeries(series);
+    body.replaceChildren(
+      h("div", { class: "replay-topline" },
+        h("strong", { text: `${CLASSIFICATION_LABELS[replay.event.classification] || replay.event.classification} · ${replay.event.severity.toUpperCase()}` }),
+        h("span", { class: "chip", text: replay.storage === "tiger_data" ? "Tiger Data hypertable" : "Local SQLite preview" })
+      ),
+      h("label", { class: "replay-picker" },
+        h("span", { text: "Saved incident " }),
+        h("select", {
+          onfocus: pauseReplay,
+          onchange: (change) => {
+            const selected = savedEvents.find((event) => event.event_id === change.target.value);
+            if (selected) loadReplay(selected);
+          },
+        }, savedEvents.map((event) => h("option", {
+          value: event.event_id,
+          selected: event.event_id === replay.event.event_id,
+          text: `${formatTime(event.detected_at)} · ${event.severity.toUpperCase()} · ${CLASSIFICATION_LABELS[event.classification] || event.classification} · ${event.affected_nodes.length} nodes`,
+        })))
+      ),
+      h("p", { class: "small muted", text: `${replay.event.event_id} · saved ${replay.readings.length} readings · replay time ${formatTime(time)} (${state.replayIndex + 1}/${times.length})` }),
+      h("div", { class: "replay-controls" },
+        h("button", { type: "button", class: "button small", text: state.replayPlaying ? "Pause" : state.replayIndex >= times.length - 1 ? "Play again" : "Play", onclick: () => { if (state.replayPlaying) { pauseReplay(); renderReplay(); } else playReplay(); } }),
+        h("input", { type: "range", min: "0", max: String(Math.max(0, times.length - 1)), value: String(state.replayIndex), "aria-label": "Replay time", oninput: (event) => { pauseReplay(); state.replayIndex = Number(event.target.value); renderReplay(); } })
+      ),
+      h("p", { class: "replay-reason", text: replay.detector_reason }),
+      h("p", { class: "muted small", text: `First change means at least ${replay.change_threshold_cm} cm from that node's first usable saved reading. Sources are captured at detection time.` }),
+      h("div", { class: "replay-nodes" }, replay.nodes.map((node) =>
+        h("div", { class: `replay-node${node.affected ? " is-affected" : ""}` },
+          h("strong", { text: node.node_id }),
+          sourceTag(node.source, node.node_id),
+          h("span", { text: node.first_changed_at ? `Changed ${formatTime(node.first_changed_at)}` : "No ≥1 cm change" }),
+          h("span", { class: "muted small", text: `Peak Δ ${node.peak_change_cm.toFixed(2)} cm` })
+        )
+      ))
     );
   }
 
@@ -1126,7 +1271,10 @@
   function init() {
     mapView = window.WaveGuardMap.createMap($("map"), NODE_META);
     chartView = window.WaveGuardCharts.createChart($("level-chart"), NODE_META);
+    replayChartView = window.WaveGuardCharts.createChart($("replay-chart"), NODE_META);
     $("api-url").textContent = API_BASE_URL;
+    $("close-replay").addEventListener("click", closeReplay);
+    $("open-replay-history").addEventListener("click", openSavedReplay);
     $("demo-panel").hidden = !DEMO_CONTROLS;
 
     document.querySelectorAll("[data-scenario]").forEach((button) => {

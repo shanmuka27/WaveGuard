@@ -30,6 +30,12 @@ class EventService:
         self._last_event_signature = None
         self._last_event_time = None
 
+    def reset_node_signals(self, node_ids: list[str]) -> None:
+        """Start fresh signal windows for simulated neighbors without losing the real node."""
+        for node_id in node_ids:
+            self.histories[node_id].clear()
+            self.severity_by_node.pop(node_id, None)
+
     def ingest(self, reading: Reading, detect: bool = True) -> Optional[Event]:
         self.database.save_reading(reading)
         previous = self.latest_by_node.get(reading.node_id)
@@ -75,7 +81,8 @@ class EventService:
         self.current_event = event
         self._last_event_signature = signature
         self._last_event_time = now
-        self.database.save_event(event)
+        evidence = [reading for history in self.histories.values() for reading in history]
+        self.database.save_event_with_readings(event, evidence)
         return event
 
     def overall_severity(self) -> Severity:

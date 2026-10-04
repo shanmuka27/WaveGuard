@@ -67,8 +67,12 @@ def explain_event(
     event_id: str, refresh: bool = Query(default=False)
 ) -> ExplanationResult:
     event = _require_event(event_id)
+    saved_readings = database.event_readings(event_id)
+    sources = _node_sources()
+    for reading in saved_readings:
+        sources[reading.node_id] = reading.source.value
     try:
-        return get_client().explain(event, _node_sources(), refresh=refresh)
+        return get_client().explain(event, sources, refresh=refresh, readings=saved_readings)
     except WatsonxError as error:
         raise HTTPException(
             status_code=ERROR_STATUS.get(error.code, 502),

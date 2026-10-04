@@ -6,3 +6,5 @@ requests
 pyserial
 numpy
 scipy
+psycopg[binary]
+psycopg_pool
