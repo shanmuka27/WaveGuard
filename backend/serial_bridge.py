@@ -113,8 +113,9 @@ class SerialBridge:
             raw.decode("ascii"), self.node_id, self.reference_distance_cm
         )
         received_at = datetime.fromtimestamp(self.clock(), tz=timezone.utc)
-        if abs((received_at - reading.timestamp).total_seconds()) > 30:
-            reading = reading.model_copy(update={"timestamp": received_at})
+        # The backend is the clock of record: the Arduino's own clock is only as good
+        # as its last TIME sync, and a late sync drew live readings seconds behind.
+        reading = reading.model_copy(update={"timestamp": received_at})
         await self.send_time()
         event = self.event_service.ingest(reading)
         await self.connections.broadcast(

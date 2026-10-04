@@ -200,12 +200,18 @@ void takeAndEmitReading(unsigned long currentMillis) {
 
   // Emit serial message according to contract:
   // READING,<unix_timestamp>,<distance_cm>,<quality>
-  Serial.print("READING,");
-  Serial.print(currentUnixTime);
-  Serial.print(",");
-  Serial.print(distanceCm, 2);
-  Serial.print(",");
-  Serial.println(quality, 2);
+  // Built as one line and sent in a single write: on the UNO Q every print is a
+  // separate message through the board's Linux side, and six of them per reading
+  // delayed delivery.
+  String line = "READING,";
+  line += String(currentUnixTime);
+  line += ",";
+  line += String(distanceCm, 2);
+  line += ",";
+  line += String(quality, 2);
+  line += '\r';
+  line += '\n';
+  Serial.print(line);
 }
 
 // ================= Serial Command Parsing =============
