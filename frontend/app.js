@@ -1016,7 +1016,9 @@
         { class: "affected" },
         event.affected_nodes.map((nodeId) => {
           const node = state.nodes.get(nodeId);
-          return h("li", {}, nodeId, sourceTag(node ? node.source : null, nodeId));
+          // A node's source can change after the event (scenario -> live sensor), so
+          // label sources only while the event is live; Replay event has the saved ones.
+          return h("li", {}, nodeId, active ? sourceTag(node ? node.source : null, nodeId) : null);
         })
       ),
       h("p", { class: "event-meta", text: `${event.event_id} · detected ${formatTime(event.detected_at)}` }),
