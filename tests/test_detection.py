@@ -55,3 +55,32 @@ def test_batched_writes_save_every_reading_once_flushed(tmp_path) -> None:
     service.flush_readings()
 
     assert len(database.latest_readings(100)) == 30
+
+
+def test_raised_alert_holds_through_a_brief_dip(tmp_path) -> None:
+    from backend.database import Database
+    from backend.services.event_service import EventService
+    from backend.schemas import Severity
+
+    database = Database(str(tmp_path / "hold.db"))
+    database.initialize()
+    service = EventService(database)
+    start = datetime(2026, 10, 4, tzinfo=timezone.utc)
+    oscillating = [3.5 * sin(index * pi / 3) for index in range(12)]
+    for node in ("A-01", "B-02", "C-03"):
+        for index, value in enumerate(oscillating):
+            service.ingest(Reading(node_id=node, timestamp=start + timedelta(seconds=index),
+                                   water_level_cm=value, quality=0.98,
+                                   source=ReadingSource.SIMULATED), detect=False)
+    assert service.detect_event().severity == Severity.WARNING
+
+    # One node calms: correlation now only supports a watch, but the warning holds.
+    for index in range(12, 36):
+        service.ingest(Reading(node_id="C-03", timestamp=start + timedelta(seconds=index),
+                               water_level_cm=0.0, quality=0.98,
+                               source=ReadingSource.SIMULATED), detect=False)
+    service.detect_event()
+    assert service.overall_severity() == Severity.WARNING
+
+    service.reset_live_state()  # a new scenario clears it at once
+    assert service.overall_severity() == Severity.SAFE

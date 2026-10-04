@@ -205,6 +205,7 @@ async def _stream_playback(scenario: str, levels: dict[str, list[float]]) -> Non
             now = datetime.now(timezone.utc)
             index = _loop_index(scenario, step)
             step += 1
+            step_readings = []
             for node_id, source in NODES:
                 # In manual mode the physical station is the live sensor.
                 if node_id == PHYSICAL_NODE and not serial_bridge.holding():
@@ -213,14 +214,17 @@ async def _stream_playback(scenario: str, levels: dict[str, list[float]]) -> Non
                         and time.monotonic() < _neighbor_response_until):
                     continue
                 reading = _reading(node_id, source, levels[node_id][index], now)
-                event = event_service.ingest(reading)
+                event_service.ingest(reading, detect=False)
+                step_readings.append(reading)
+            # Judge the shoreline once per second, after every node has its new
+            # reading; judging after each node flickered between partial states.
+            event = event_service.detect_event()
+            for reading in step_readings:
                 await connections.broadcast(
-                    {
-                        "type": "reading",
-                        "reading": reading.model_dump(mode="json"),
-                        "event": event.model_dump(mode="json") if event else None,
-                    }
+                    {"type": "reading", "reading": reading.model_dump(mode="json"), "event": None}
                 )
+            if event is not None:
+                await connections.broadcast({"type": "event", "event": event.model_dump(mode="json")})
             await serial_bridge.sync_state()
     except asyncio.CancelledError:
         raise

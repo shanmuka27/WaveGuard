@@ -15,6 +15,12 @@ from backend.schemas import Event, EventClassification, NodeStatus, Reading, Sev
 
 logger = logging.getLogger(__name__)
 
+# Once raised, an alert does not step down until the lower reading has held this
+# long, so a brief dip in a real record cannot flicker the board between colours.
+# A new scenario (reset_live_state) still clears it at once.
+ALERT_HOLD_SECONDS = 15.0
+_RANK = {Severity.SAFE: 0, Severity.WATCH: 1, Severity.WARNING: 2}
+
 
 class ReadingWriter:
     """Saves readings on a background thread, in batches.
@@ -79,6 +85,7 @@ class EventService:
         self.current_event: Optional[Event] = None
         self._last_event_signature: Optional[Tuple[str, Tuple[str, ...], str]] = None
         self._last_event_time: Optional[datetime] = None
+        self._alert_confirmed_at: Optional[datetime] = None
 
     def reset_live_state(self) -> None:
         self.histories.clear()
@@ -87,6 +94,7 @@ class EventService:
         self.current_event = None
         self._last_event_signature = None
         self._last_event_time = None
+        self._alert_confirmed_at = None
 
     def reset_node_signals(self, node_ids: list[str]) -> None:
         """Start fresh signal windows for simulated neighbors without losing the real node."""
@@ -126,16 +134,26 @@ class EventService:
             assessments,
             {node_id: list(history) for node_id, history in self.histories.items()},
         )
+        now = datetime.now(timezone.utc)
+        current = self.current_event
+        holding = (
+            current is not None
+            and self._alert_confirmed_at is not None
+            and (now - self._alert_confirmed_at).total_seconds() < ALERT_HOLD_SECONDS
+        )
         if event is None:
-            self.current_event = None
+            if not holding:
+                self.current_event = None
             return None
+        if holding and _RANK[event.severity] < _RANK[current.severity]:
+            return None  # a brief dip: keep the raised alert
+        self._alert_confirmed_at = now
 
         signature = (
             event.classification.value,
             tuple(sorted(event.affected_nodes)),
             event.severity.value,
         )
-        now = datetime.now(timezone.utc)
         is_duplicate = (
             signature == self._last_event_signature
             and self._last_event_time is not None
